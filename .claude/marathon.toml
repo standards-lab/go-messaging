@@ -6,10 +6,19 @@ check = "mise run check"
 # it reads the network, so CI never runs it.
 currency = "mise run currency"
 
-# Remote platform and the commands that publish and merge a finished branch.
-# No CI exists yet, so the merge waits on no checks and there is no ci key. The library task's CI
-# workflow restores the convention's `gh pr checks --watch &&` merge and the ci wait.
+# Remote platform, the commands that publish and merge a finished branch, and the CI wait.
+# The merge waits on the pull request's checks; the ci wait covers every push run of the merge
+# commit on main, the integration job included.
 [remote]
 platform = "github"
 publish = "gh pr create"
-merge = "gh pr merge --merge --delete-branch"
+merge = "gh pr checks --watch && gh pr merge --merge --delete-branch"
+ci = '''
+sha=$(git rev-parse HEAD)
+for _ in $(seq 30); do
+  runs=$(gh run list --commit "$sha" --event push --json databaseId --jq '.[].databaseId')
+  [ -n "$runs" ] && break || sleep 10
+done
+[ -n "$runs" ] || exit 1
+for run in $runs; do gh run watch --exit-status "$run" || exit 1; done
+'''

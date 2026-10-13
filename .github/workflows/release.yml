@@ -1,0 +1,46 @@
+name: Release
+
+# A pushed tag releases the module it names: v<semver> the base module,
+# postgres/v<semver> and nats/v<semver> the sub-modules. The tag's path
+# prefix picks the module's changelog, whose matching section becomes the
+# release notes.
+on:
+  push:
+    tags:
+      - 'v*'
+      - '**/v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Determine module from tag
+        id: module
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$TAG" == */v* ]]; then
+            PREFIX="${TAG%/v*}"
+            echo "prefix=$PREFIX/" >> "$GITHUB_OUTPUT"
+            echo "changelog=$PREFIX/CHANGELOG.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+            echo "changelog=CHANGELOG.md" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: taiki-e/create-gh-release-action@v1.11.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          changelog: ${{ steps.module.outputs.changelog }}
+          prefix: ${{ steps.module.outputs.prefix }}
