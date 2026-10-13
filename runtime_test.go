@@ -577,8 +577,8 @@ func TestConfigFinalize(t *testing.T) {
 	if empty.RelayPoll.Duration() != messaging.DefaultRelayPoll {
 		t.Errorf("RelayPoll = %v, want the default", empty.RelayPoll)
 	}
-	if empty.RelayTimeout.Duration() != 10*time.Second {
-		t.Errorf("RelayTimeout = %v, want the default of 10s", empty.RelayTimeout)
+	if empty.RelayTimeout.Duration() != messaging.DefaultRelayTimeout {
+		t.Errorf("RelayTimeout = %v, want the default", empty.RelayTimeout)
 	}
 
 	for _, v := range []string{"0s", "-1s", "soon"} {

@@ -250,8 +250,12 @@ func TestTransientPublishFailureEndsThePassAndIsReported(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- r.Receive(ctx, pub.publish) }()
 	waitFor(t, "the report", func() bool { return len(rep.all()) > 0 })
-	if !r.Ready() {
-		t.Error("a publish failure made the relay not ready; readiness speaks only for the database")
+	// The relay settles its readiness after the report, so it is watched
+	// for a quiet window rather than read once.
+	for deadline := time.Now().Add(50 * time.Millisecond); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if !r.Ready() {
+			t.Fatal("a publish failure made the relay not ready; readiness speaks only for the database")
+		}
 	}
 	cancel()
 	if err := <-done; err != nil {

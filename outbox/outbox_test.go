@@ -16,9 +16,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// The outbox is the sink a recorder writes through, on sqlate's *Tx.
-var _ = event.NewRecorder[*sqlate.Tx]
-
 // compile builds statements from text keyed by name, over sqlate's test
 // dialect, so the engine contract is tested without a driver.
 func compile(t *testing.T, files map[string]string) *query.Statements {

@@ -163,8 +163,8 @@ func (r *Relay) settle(ctx context.Context, err error) bool {
 		return true
 	}
 	r.report(ctx, err)
-	var publish *PublishError
-	return errors.As(err, &publish) || ctx.Err() != nil
+	_, published := errors.AsType[*PublishError](err)
+	return published || ctx.Err() != nil
 }
 
 // pass handles rows until none is left, returning nil, or until one fails.
