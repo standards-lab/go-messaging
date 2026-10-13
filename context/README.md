@@ -5,8 +5,9 @@ organization's Go implementation of the Elemental Architecture. It gives a servi
 broker-agnostic contract to emit events and run reactors on: events are go-core's CloudEvents
 `event` type, emitted through a transactional outbox and consumed idempotently through an inbox,
 and consumers are go-core `reactor`s on a subscription source. NATS JetStream is the declared
-provider, and a memory provider serves tests. The base module depends on the standard library and
-go-core only; the postgres engine and the NATS provider are sub-modules.
+provider, and a memory provider serves tests. The base module depends on the standard library,
+go-core, sqlate, and sqlate/query, the adjacent library the outbox and inbox engine contract
+builds on; the postgres engine and the NATS provider are sub-modules.
 
 The README and each package's `doc.go` document this repository. The
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md) standard states the principles it follows.
@@ -19,14 +20,16 @@ spike-messaging's `messaging` modules
 
 ## Capability map
 
-Nothing is built yet. The code and `doc.go` become authoritative as each capability lands, and
-an unbuilt capability gains written detail when a session is about to build it.
+The code and each `doc.go` are authoritative for a built capability; an unbuilt capability gains
+written detail when a session is about to build it.
 
-- **Broker contract and subscriptions**: `Subscription` with `Start`, `MaxDeliver`, and `Normalize`.
-- **Runtime and its error hook**: `Config` with the relay `Timeout`, and the delivery attempt.
-- **Outbox**: transactional emission, with poison-row quarantine.
-- **Inbox**: idempotent consumption.
-- **Memory provider** and **`messagingtest`**, the conformance suite.
-- **Postgres engine**: the `postgres` sub-module and its `messaging` migration set.
-- **NATS provider**: the JetStream `nats` sub-module, binding a stream without provisioning it.
-- **CI and release**: CI runs `mise run check` on every pull request; each module releases on its own tags.
+- **Broker contract and subscriptions**: the root package, `messaging` (`doc.go`, `broker.go`).
+- **Runtime and its error hook**: the root package (`runtime.go`, `config.go`, `failure.go`).
+- **Outbox**, with poison-row quarantine: `outbox/doc.go`.
+- **Inbox**: `inbox/doc.go`.
+- **Memory provider** and the conformance suite: `memory/doc.go`, `messagingtest/doc.go`.
+- **Postgres engine** and its `messaging` migration set: `postgres/doc.go`, with the
+  scratch-database helper in `postgres/pgtest/doc.go`.
+- **NATS provider**: not built; `nats` is a scaffold until the nats task binds a JetStream
+  stream without provisioning it.
+- **CI and release**: `.github/workflows/`; the README's "Releases" section.

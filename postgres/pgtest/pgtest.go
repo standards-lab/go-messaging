@@ -1,9 +1,3 @@
-// Package pgtest gives each test its own throwaway Postgres database, so no
-// test depends on the compose stack's database or on another test. [Scratch]
-// creates one on any administrative connection, for a service's domain
-// tests and for the harness that points a service process at it; [Open]
-// serves the engine's own integration suite, on the server MESSAGING_DSN
-// names. Each database is dropped when the test ends.
 package pgtest
 
 import (
