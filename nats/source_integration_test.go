@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	neturl "net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -316,14 +317,16 @@ func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
 
 // A deleted stream ends Receive with its error: the consumer's deletion,
 // which a waiting pull hears of, or the stream's absence, which the member
-// learns by asking once its pulls fail.
+// learns by asking once its pulls fail. A deletion that lands between one
+// pull's expiry and the next is learned by asking, so a waiting pull accepts
+// either error.
 func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 	for name, tc := range map[string]struct {
 		hold bool // the handler holds a delivery, so no pull is waiting
-		want error
+		want []error
 	}{
-		"while pulling":  {want: jetstream.ErrConsumerDeleted},
-		"while handling": {hold: true, want: jetstream.ErrStreamNotFound},
+		"while pulling":  {want: []error{jetstream.ErrConsumerDeleted, jetstream.ErrStreamNotFound}},
+		"while handling": {hold: true, want: []error{jetstream.ErrStreamNotFound}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b, url, stream, _ := ownerBroker(t)
@@ -353,8 +356,8 @@ func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 			}
 			close(release)
 			err = ended(t, done, "its stream was deleted")
-			if !errors.Is(err, tc.want) {
-				t.Errorf("Receive = %v, want %v", err, tc.want)
+			if !slices.ContainsFunc(tc.want, func(w error) bool { return errors.Is(err, w) }) {
+				t.Errorf("Receive = %v, want one of %v", err, tc.want)
 			}
 			if src.Ready() {
 				t.Error("the source reports ready after Receive ended")
