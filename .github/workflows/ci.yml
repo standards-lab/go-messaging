@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # The one check a developer runs: every module's gates, then sqlint over the
+  # postgres module. The check loops over the modules itself, so there is no
+  # per-module matrix.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: jdx/mise-action@v5.1.2
+
+      - name: mise run check
+        run: mise run check
+
+  # The integration tier: the postgres module's suite against the
+  # repository's compose PostgreSQL, the same definition a developer runs. On
+  # push to main and on demand, below the per-PR unit rate by design; a
+  # release is cut only from a main whose run has passed. The task starts the
+  # server, prints its log on a failure, and stops it itself.
+  integration:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: jdx/mise-action@v5.1.2
+
+      - name: mise run integration
+        run: mise run integration

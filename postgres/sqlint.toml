@@ -1,0 +1,25 @@
+# sqlint: the postgres module's SQL conventions, run by `mise run check`
+# from this directory. The engine names the native forms a standard-tier
+# file may not use, and the sources name the pattern catalogs the
+# statements' includes resolve against: sqlate's own. The base module holds
+# no SQL.
+engine = "github.com/standards-lab/sqlate/postgres"
+
+[sources]
+sql = "github.com/standards-lab/sqlate"
+
+# The outbox's and the inbox's statements: named for their operation, the
+# delimiter kept out of comments and literals, and no native form in a
+# standard-tier file; a native file is exempt by its tier and carries its
+# port note.
+[statements]
+dirs = ["statements"]
+verb_named = true
+delimiter = true
+native_forms = true
+
+# The messaging migration set. The migrations role has no native-forms
+# check; the DDL is PostgreSQL's, the only engine's.
+[migrations]
+dirs = ["migrations"]
+single_statement = true

@@ -1,0 +1,155 @@
+[tools]
+go = "1.27.2"
+golangci-lint = "2.14.0"
+jq = "1.8.2"
+# crane lists an image's tags for currency's image scan.
+"aqua:google/go-containerregistry" = "0.22.1"
+
+# Space-separated list of module directories, kept in sync with the go.work
+# use-list. "." is the base module; postgres is the database engine
+# sub-module and nats the broker provider sub-module. The maintenance tasks
+# below skip a directory without a go.mod; check, currency, and upgrade
+# require one.
+[env]
+GO_MODULES = ". postgres nats"
+# The integration suite's server: compose.yml's PostgreSQL, whose port
+# follows POSTGRES_PORT as compose/postgres.yml's does. Each test creates
+# and drops its own database on it.
+MESSAGING_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5435') }}/app?sslmode=disable"
+
+# The one check: read-only and deterministic, stopping at the first failure.
+# Each module builds with the workspace off, proving it resolves its own
+# pins standalone, and lints under the .golangci.yml nearest it. Vet and
+# lint include the integration build tag, so the integration suite compiles
+# without a database; postgres's .golangci.yml sets the tag for its lint.
+# sqlint then lints the postgres module's statements and migrations.
+[tasks.check]
+description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the postgres module; writes nothing"
+run = '''
+set -eu
+export GOWORK=off
+for mod in $GO_MODULES; do
+  echo "check: $mod"
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go build ./...
+  go vet -tags integration ./...
+  unformatted=$(gofmt -l .)
+  if [ -n "$unformatted" ]; then echo "gofmt: unformatted files:"; echo "$unformatted"; exit 1; fi
+  go fix -diff ./...
+  go mod tidy -diff
+  go test -race ./...
+  golangci-lint run ./...
+done
+# sqlint is the postgres module's tool, and resolves the engine sqlint.toml
+# names through the module's own requirements.
+echo "check: sqlint"
+cd "$MISE_PROJECT_ROOT/postgres"
+go tool sqlint .
+'''
+
+# Currency: report what trails its latest, and the convenience that upgrades it.
+[tasks.currency]
+description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
+run = "scripts/currency.sh"
+
+[tasks.upgrade]
+description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+run = '''
+set -eu
+export GOWORK=off
+# The go directive follows the current Go minor, with no toolchain line.
+go_minor=$(mise latest go | cut -d. -f1,2)
+for mod in $GO_MODULES; do
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go mod edit -go="$go_minor" -toolchain=none
+  direct=$(go mod edit -json | jq -r '.Require[]? | select(.Indirect | not) | .Path')
+  [ -z "$direct" ] || go get $(printf '%s@latest ' $direct)
+  go mod tidy
+done
+cd "$MISE_PROJECT_ROOT"
+mise upgrade --bump --local
+'''
+
+# Maintenance.
+[tasks.tidy]
+description = "Run go mod tidy across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> tidy: $mod"
+  (cd "$mod" && go mod tidy)
+done
+'''
+
+# Verification.
+[tasks.fmt]
+description = "Format all Go source"
+run = "gofmt -w ."
+
+[tasks.lint]
+description = "Run golangci-lint across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> lint: $mod"
+  (cd "$mod" && golangci-lint run ./...)
+done
+'''
+
+[tasks.build]
+description = "Build each module with the workspace off, proving it resolves its own pins standalone"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> build (GOWORK=off): $mod"
+  (cd "$mod" && GOWORK=off go build ./...)
+done
+'''
+
+[tasks.vet]
+description = "Run go vet across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> vet: $mod"
+  (cd "$mod" && go vet ./...)
+done
+'''
+
+# Testing.
+[tasks.test]
+description = "Run the unit tier across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> test: $mod"
+  (cd "$mod" && go test -race ./...)
+done
+'''
+
+# The integration tier runs the postgres module's suite against compose.yml's
+# PostgreSQL, the server MESSAGING_DSN names. The harness keeps its data in
+# tmpfs, so every start is empty; integration starts it, runs the suite, and
+# stops it whether the suite passes or fails, printing its log on failure.
+[tasks.integration]
+description = "Run the postgres module's integration suite against a fresh compose PostgreSQL"
+env = { GOWORK = "off" }
+run = '''
+set -e
+trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs postgres; docker compose down; exit $rc' EXIT
+docker compose up -d --wait --build
+(cd postgres && go test -race -tags integration -count=1 -v ./...)
+'''
+
+[tasks.up]
+description = "Start the compose PostgreSQL and wait until it is healthy"
+run = "docker compose up -d --wait --build"
+
+[tasks.down]
+description = "Stop the compose PostgreSQL, discarding its data"
+run = "docker compose down"

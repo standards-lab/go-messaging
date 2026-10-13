@@ -1,0 +1,9 @@
+services:
+  postgres:
+    build:
+      context: postgres
+    ports:
+      # 5435 by default so the harness coexists with sqlate on 5433, blobfs
+      # on 5434, and a service on 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-5435}:5432"
+    tmpfs: /var/lib/postgresql

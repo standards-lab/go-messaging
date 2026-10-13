@@ -1,0 +1,66 @@
+# golangci-lint v2 configuration for the base module, run by `mise run check`.
+# golangci-lint takes the configuration nearest the directory it runs in, so
+# the postgres and nats sub-modules carry their own, without depguard.
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused),
+  # plus depguard, which holds the base module to its allowed imports, and
+  # testpackage, which keeps tests black-box. Its skip regexp is narrowed
+  # to export_test.go, the one white-box file allowed, which only exports a
+  # clock or probe hook the black-box tests use.
+  default: standard
+  enable:
+    - depguard
+    - testpackage
+  settings:
+    testpackage:
+      skip-regexp: export_test\.go
+    depguard:
+      # The base imports no broker and no engine: the standard library,
+      # go-core, sqlate's statement packages, and its own packages. Allow
+      # entries match by prefix unless they end in `$`, so each is anchored:
+      # go-core as the exact module path or a path under it (not a sibling
+      # like go-core-extra), sqlate and sqlate/query as exactly themselves
+      # (not sqlate/postgres), and the module as itself or a package under
+      # it. The longest match wins, so the deny entries keep the postgres and
+      # nats sub-modules out of the base despite the module's prefix.
+      rules:
+        production:
+          list-mode: strict
+          files:
+            - $all
+            - "!$test"
+          allow:
+            - $gostd
+            - github.com/standards-lab/go-core$
+            - github.com/standards-lab/go-core/
+            - github.com/standards-lab/sqlate$
+            - github.com/standards-lab/sqlate/query$
+            - github.com/standards-lab/go-messaging$
+            - github.com/standards-lab/go-messaging/
+          deny:
+            - pkg: github.com/standards-lab/go-messaging/postgres
+              desc: the base imports no engine; the postgres sub-module depends on the base
+            - pkg: github.com/standards-lab/go-messaging/nats
+              desc: the base imports no broker; the nats sub-module depends on the base
+        # Tests may also import sqlate's sqltest, which checks the
+        # statements the packages compile.
+        tests:
+          list-mode: strict
+          files:
+            - $test
+          allow:
+            - $gostd
+            - github.com/standards-lab/go-core$
+            - github.com/standards-lab/go-core/
+            - github.com/standards-lab/sqlate$
+            - github.com/standards-lab/sqlate/query$
+            - github.com/standards-lab/sqlate/sqltest$
+            - github.com/standards-lab/go-messaging$
+            - github.com/standards-lab/go-messaging/
+          deny:
+            - pkg: github.com/standards-lab/go-messaging/postgres
+              desc: the base imports no engine; the postgres sub-module depends on the base
+            - pkg: github.com/standards-lab/go-messaging/nats
+              desc: the base imports no broker; the nats sub-module depends on the base
