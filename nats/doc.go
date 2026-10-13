@@ -38,8 +38,8 @@
 // Receive and pulls one message at a time. Each handler's context carries
 // the delivery's attempt and a deadline of the subscription's AckWait. The
 // source reports each error it survives to its report function, among them
-// every failed pull, and a pull that ends empty while the connection is
-// down counts as failed: during an outage a member reports about every 1.1
+// every failed pull. A pull that ends empty while the connection is down
+// counts as failed, so during an outage a member reports about every 1.1
 // seconds and is not ready until a pull succeeds again.
 //
 // [Broker.Conn] is the native handle, for uses beyond the standard tier such
