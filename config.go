@@ -19,9 +19,9 @@ const (
 )
 
 // Config is a service's messaging block, the part of its messaging that
-// names no broker: the provider's own block sits beside it. Source is the service's CloudEvents source, one value for
-// every replica. RelayPoll is how long the relay waits between passes once
-// the outbox is empty. RelayTimeout bounds the relay's publish of one
+// names no broker: the provider's own block sits beside it. Source is the
+// service's CloudEvents source, one value for every replica. RelayPoll is
+// how long the relay waits between passes once the outbox is empty. RelayTimeout bounds the relay's publish of one
 // event, and so how long a hung publish holds the event's outbox row; it is
 // the relay's outbox.Timeout.
 type Config struct {

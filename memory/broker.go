@@ -72,8 +72,8 @@ func (b *Broker) Publish(_ context.Context, e event.Event) error {
 // creating it on first use, at the log's beginning or, under
 // [messaging.StartNew], at its end. Sources under one Name share its position
 // and split its work. A later subscription under an existing Name must match
-// the first, as binding to a JetStream durable must. The source passes
-// report a message it cannot decode, which it terminates.
+// the first, as binding to a JetStream durable must. The source passes each
+// message it cannot decode to report and terminates it.
 func (b *Broker) Subscribe(sub messaging.Subscription, report messaging.Report) (reactor.Source[event.Event], error) {
 	if err := sub.Validate(); err != nil {
 		return nil, err

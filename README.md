@@ -13,10 +13,11 @@ a transactional outbox and consumed idempotently through an inbox, and every con
 | PostgreSQL engine | `github.com/standards-lab/go-messaging/postgres` | `postgres/v*` |
 | NATS JetStream provider | `github.com/standards-lab/go-messaging/nats` | `nats/v*` |
 
-The base module depends on the standard library, go-core, sqlate, and sqlate/query, the adjacent
-library the outbox and inbox engine contract builds on, and nothing else: no driver, no dialect, no
-broker client. depguard holds the base to that line in `mise run check`. An engine's driver and
-dialect enter only through its sub-module, and a broker's client only through its provider's.
+The base module depends on the standard library, go-core, and sqlate with its `query` package,
+the adjacent library the outbox's and inbox's engine contract builds on, and nothing else: no
+driver, no dialect, no broker client. depguard holds the base to that line in `mise run check`. An
+engine's driver and dialect enter only through its sub-module, and a broker's client only through
+its provider's.
 
 The `nats` sub-module is a scaffold: the JetStream provider is not built yet.
 

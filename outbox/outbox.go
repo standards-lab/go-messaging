@@ -32,12 +32,12 @@ func (o *Outbox) Sink() event.Sink[*sqlate.Tx] { return sink{o.eng} }
 // passes once a pass finds no row. poll and any [Timeout] must be positive,
 // and any [Drain] not negative.
 //
-// The relay passes report each error it survives, with the context it was
-// receiving under: each row it quarantines, as a [*QuarantineError]; each
-// pass a transient publish failure ends, as a [*PublishError]; and each
-// database error. report has messaging.Report's shape, so a messaging.Report
-// can be given. It must not block for long, since the relay waits on it
-// before its next row. A nil report discards them.
+// The relay passes each error it survives to report, with the context it
+// was receiving under: each row it quarantines, as a [*QuarantineError];
+// each pass a transient publish failure ends, as a [*PublishError]; and
+// each database error. A nil report discards them. report has
+// messaging.Report's shape, so a messaging.Report can be given. It must not
+// block for long, since the relay waits on it before its next row.
 func (o *Outbox) Relay(db sqlate.Beginner, poll time.Duration, report func(ctx context.Context, err error), opts ...RelayOption) *Relay {
 	if report == nil {
 		report = func(context.Context, error) {}

@@ -6,8 +6,8 @@ broker-agnostic contract to emit events and run reactors on: events are go-core'
 `event` type, emitted through a transactional outbox and consumed idempotently through an inbox,
 and consumers are go-core `reactor`s on a subscription source. NATS JetStream is the declared
 provider, and a memory provider serves tests. The base module depends on the standard library,
-go-core, sqlate, and sqlate/query, the adjacent library the outbox and inbox engine contract
-builds on; the postgres engine and the NATS provider are sub-modules.
+go-core, and sqlate with its `query` package, the adjacent library the outbox's and inbox's
+engine contract builds on; the postgres engine and the NATS provider are sub-modules.
 
 The README and each package's `doc.go` document this repository. The
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md) standard states the principles it follows.

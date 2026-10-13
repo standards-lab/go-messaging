@@ -21,10 +21,10 @@ type source struct {
 
 // Receive delivers the consumer's events to fn one at a time until ctx
 // ends. Each delivery's context carries its AckWait deadline and its
-// attempt, which [messaging.Attempt] reads. A handler
-// error never ends Receive; the delivery's outcome follows
-// [messaging.Broker]'s rule. A member settles the event it is handling
-// before it next checks ctx, so a drained handler's outcome holds.
+// attempt, which [messaging.Attempt] reads. A handler error never ends
+// Receive; the delivery's outcome follows [messaging.Broker]'s rule. A
+// member settles the event it is handling before it next checks ctx, so a
+// drained handler's outcome holds.
 func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) error {
 	s.ready.Store(true)
 	defer s.ready.Store(false)

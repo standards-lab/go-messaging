@@ -55,9 +55,9 @@ func Drain(d time.Duration) RelayOption {
 // the row stays locked while the event is published. When the handler
 // returns nil, the row is marked published in the same transaction. When it
 // returns an error marked [event.Permanent], the row is quarantined in the
-// same transaction instead, and the pass goes on to the next row; so it does
-// for a row whose header or event does not decode, without calling the
-// handler. When the handler returns any other error, the transaction rolls
+// same transaction instead, and the pass goes on to the next row. A row
+// whose header or event does not decode is quarantined the same way,
+// without calling the handler. When the handler returns any other error, the transaction rolls
 // back, the row stays unpublished, and the pass ends. The next pass, a poll
 // later, retries it, without bound. A stop anywhere before the commit leaves
 // the row to be published again under the same source and id, so delivery
