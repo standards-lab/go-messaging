@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	neturl "net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -301,12 +302,178 @@ func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
 	if src.Ready() {
 		t.Error("the source reports ready after Receive ended")
 	}
-	errs := r.seen()
-	if len(errs) == 0 {
+	// Failed pulls are reported too, so only a report that names the
+	// acknowledgement proves its failure reached the report function.
+	acked := false
+	for _, e := range r.seen() {
+		t.Logf("reported: %v", e)
+		acked = acked || strings.Contains(e.Error(), "acknowledge")
+	}
+	if !acked {
 		t.Error("the acknowledgement to a deleted consumer was not reported")
 	}
-	for _, e := range errs {
-		t.Logf("reported: %v", e)
+}
+
+// A deleted stream ends Receive with its error: the consumer's deletion,
+// which a waiting pull hears of, or the stream's absence, which the member
+// learns by asking once its pulls fail.
+func TestSourceDeletedStreamEndsReceive(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hold bool // the handler holds a delivery, so no pull is waiting
+		want error
+	}{
+		"while pulling":  {want: jetstream.ErrConsumerDeleted},
+		"while handling": {hold: true, want: jetstream.ErrStreamNotFound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, url, stream, _ := ownerBroker(t)
+			src, err := b.Subscribe(messaging.Subscription{Name: "orphan"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handling, release := make(chan struct{}), make(chan struct{})
+			done := receive(t, src, func(context.Context, event.Event) error {
+				close(handling)
+				<-release
+				return nil
+			})
+			eventually(t, "the source to be ready", src.Ready)
+			if tc.hold {
+				publish(t, b, event.Event{ID: "o", Source: "/test", Type: "t"})
+				select {
+				case <-handling:
+				case <-time.After(failsafe):
+					t.Fatal("timed out waiting for the handler")
+				}
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+			defer cancel()
+			if err := jetStream(t, url).DeleteStream(ctx, stream); err != nil {
+				t.Fatal(err)
+			}
+			close(release)
+			err = ended(t, done, "its stream was deleted")
+			if !errors.Is(err, tc.want) {
+				t.Errorf("Receive = %v, want %v", err, tc.want)
+			}
+			if src.Ready() {
+				t.Error("the source reports ready after Receive ended")
+			}
+		})
+	}
+}
+
+// A handler error under a zero RetryDelay is nak'd at once: the event comes
+// back promptly, long before the consumer's AckWait would return it
+// unsettled.
+func TestSourceNaksAtOnceWithoutRetryDelay(t *testing.T) {
+	b, _, _, _ := ownerBroker(t)
+	sub := messaging.Subscription{Name: "prompt", AckWait: 5 * time.Second}
+	type delivery struct {
+		attempt int
+		at      time.Time
+	}
+	got := make(chan delivery, 2)
+	member(t, b, sub, nil, func(ctx context.Context, _ event.Event) error {
+		a := messaging.Attempt(ctx)
+		select {
+		case got <- delivery{a, time.Now()}:
+		default:
+		}
+		if a == 1 {
+			return errors.New("not yet")
+		}
+		return nil
+	})
+	publish(t, b, event.Event{ID: "n", Source: "/test", Type: "t"})
+	var ds []delivery
+	for len(ds) < 2 {
+		select {
+		case d := <-got:
+			ds = append(ds, d)
+		case <-time.After(failsafe):
+			t.Fatalf("deliveries %v, want two", ds)
+		}
+	}
+	if ds[0].attempt != 1 || ds[1].attempt != 2 {
+		t.Errorf("attempts %d then %d, want 1 then 2", ds[0].attempt, ds[1].attempt)
+	}
+	// Unsettled, the event would be back only after the consumer's AckWait,
+	// over five seconds.
+	if gap := ds[1].at.Sub(ds[0].at); gap > time.Second {
+		t.Errorf("redelivered after %v, want well under the AckWait of %v", gap, sub.AckWait+nats.AckMargin)
+	}
+}
+
+// A member handles one message at a time: while its handler holds one, the
+// next waits on the server, unpulled, and is delivered once the first
+// settles.
+func TestSourceOneMessageAtATime(t *testing.T) {
+	b, url, stream, _ := ownerBroker(t)
+	handling := make(chan string, 2)
+	release := make(chan struct{})
+	member(t, b, messaging.Subscription{Name: "serial"}, nil, func(ctx context.Context, e event.Event) error {
+		handling <- e.ID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+	// Registered after the member's, so it runs first and frees a held
+	// handler before the member shuts down.
+	t.Cleanup(func() { close(release) })
+	publish(t, b, event.Event{ID: "one", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "two", Source: "/test", Type: "t"})
+	next := func(what string) string {
+		t.Helper()
+		select {
+		case id := <-handling:
+			return id
+		case <-time.After(failsafe):
+			t.Fatalf("timed out waiting for %s", what)
+			return ""
+		}
+	}
+	if id := next("the first event"); id != "one" {
+		t.Fatalf("handled %s first, want one", id)
+	}
+	select {
+	case id := <-handling:
+		t.Fatalf("handled %s while the first was held", id)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if n := consumerInfo(t, jetStream(t, url), stream, "serial").NumAckPending; n != 1 {
+		t.Errorf("ack pending %d while the handler holds one, want 1", n)
+	}
+	release <- struct{}{}
+	if id := next("the second event"); id != "two" {
+		t.Errorf("handled %s second, want two", id)
+	}
+}
+
+// A source with no report function discards what it would report: it
+// survives a message that does not decode and handles the next.
+func TestSourceNilReportDiscards(t *testing.T) {
+	b, url, _, prefix := ownerBroker(t)
+	got := make(chan string, 1)
+	member(t, b, messaging.Subscription{Name: "quiet"}, nil, func(_ context.Context, e event.Event) error {
+		got <- e.ID
+		return nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+	if _, err := jetStream(t, url).Publish(ctx, prefix+".t", []byte("not an event")); err != nil {
+		t.Fatalf("publish raw bytes: %v", err)
+	}
+	publish(t, b, event.Event{ID: "after", Source: "/test", Type: "t"})
+	select {
+	case id := <-got:
+		if id != "after" {
+			t.Errorf("handled %s, want after", id)
+		}
+	case <-time.After(failsafe):
+		t.Fatal("the event after the undecodable one was not handled")
 	}
 }
 
