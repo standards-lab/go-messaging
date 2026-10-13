@@ -5,6 +5,9 @@ package nats_test
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
+	neturl "net/url"
 	"sync"
 	"testing"
 	"time"
@@ -379,5 +382,143 @@ func TestShutdownClosesWhenCtxEnds(t *testing.T) {
 	}
 	if b.Ready() {
 		t.Error("the broker reports ready after Shutdown")
+	}
+}
+
+// proxy forwards TCP connections from a local port to a server, and can cut
+// them all and later listen again on the same port, so a test sees a server
+// go away and come back without stopping the shared one.
+type proxy struct {
+	t      *testing.T
+	target string
+	addr   string
+	mu     sync.Mutex
+	ln     net.Listener
+	conns  []net.Conn
+}
+
+// newProxy listens on a free local port and forwards to the server at
+// rawURL. It is cut when the test ends.
+func newProxy(t *testing.T, rawURL string) *proxy {
+	t.Helper()
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse %s: %v", rawURL, err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	p := &proxy{t: t, target: u.Host, addr: ln.Addr().String()}
+	p.serve(ln)
+	t.Cleanup(p.cut)
+	return p
+}
+
+// url is the proxy's server URL.
+func (p *proxy) url() string { return "nats://" + p.addr }
+
+func (p *proxy) serve(ln net.Listener) {
+	p.mu.Lock()
+	p.ln = ln
+	p.mu.Unlock()
+	go func() {
+		for {
+			down, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			up, err := net.Dial("tcp", p.target)
+			if err != nil {
+				_ = down.Close()
+				continue
+			}
+			p.mu.Lock()
+			p.conns = append(p.conns, down, up)
+			p.mu.Unlock()
+			go func() { _, _ = io.Copy(up, down); _ = up.Close(); _ = down.Close() }()
+			go func() { _, _ = io.Copy(down, up); _ = up.Close(); _ = down.Close() }()
+		}
+	}()
+}
+
+// cut stops listening and closes every connection, so the server is gone.
+func (p *proxy) cut() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ln != nil {
+		_ = p.ln.Close()
+		p.ln = nil
+	}
+	for _, c := range p.conns {
+		_ = c.Close()
+	}
+	p.conns = nil
+}
+
+// restore listens again on the proxy's port, so the server is back.
+func (p *proxy) restore() {
+	p.t.Helper()
+	ln, err := net.Listen("tcp", p.addr)
+	if err != nil {
+		p.t.Fatalf("listen again on %s: %v", p.addr, err)
+	}
+	p.serve(ln)
+}
+
+// While the server is unreachable, the source reports each pull that fails
+// and reports not ready; once it is back, the reports stop, the source is
+// ready again, and it delivers.
+func TestSourceReportsOutage(t *testing.T) {
+	url := natstest.Open(t)
+	stream, prefix := natstest.Scratch(t, url)
+	p := newProxy(t, url)
+	b := started(t, nats.Config{URL: p.url(), Stream: stream, Prefix: prefix, Owner: owner()})
+	var r reports
+	got := make(chan string, 1)
+	src, err := b.Subscribe(messaging.Subscription{Name: "outage"}, r.report)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	receive(t, src, func(_ context.Context, e event.Event) error {
+		select {
+		case got <- e.ID:
+		default:
+		}
+		return nil
+	})
+	eventually(t, "the source to be ready", src.Ready)
+
+	p.cut()
+	cut := time.Now()
+	eventually(t, "the source to report not ready", func() bool { return !src.Ready() })
+	time.Sleep(4 * time.Second)
+	during := r.seen()
+	if len(during) < 2 {
+		t.Fatalf("%d reports in %v of outage, want repeated reports: %v", len(during), time.Since(cut).Round(time.Millisecond), during)
+	}
+	t.Logf("%d reports in %v of outage, the last: %v", len(during), time.Since(cut).Round(time.Millisecond), during[len(during)-1])
+	if src.Ready() {
+		t.Error("the source reports ready while the server is unreachable")
+	}
+
+	p.restore()
+	eventually(t, "the source to be ready again", src.Ready)
+	settled := len(r.seen())
+	time.Sleep(3 * time.Second)
+	if after := r.seen(); len(after) != settled {
+		t.Errorf("reports went on after the source was ready again: %v", after[settled:])
+	}
+	if !src.Ready() {
+		t.Error("the source is not ready after the server came back")
+	}
+	publish(t, b, event.Event{ID: "back", Source: "/test", Type: "t"})
+	select {
+	case id := <-got:
+		if id != "back" {
+			t.Errorf("delivered %q, want back", id)
+		}
+	case <-time.After(failsafe):
+		t.Fatal("no event delivered after the server came back")
 	}
 }

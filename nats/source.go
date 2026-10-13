@@ -90,8 +90,9 @@ type source struct {
 // or the consumer or its stream is deleted. Every other error it survives
 // goes to the report function: a message it cannot decode or whose
 // metadata does not parse, both of which it terminates; an outcome that
-// fails to send; and a failed pull, after which the source reports not
-// ready until a pull succeeds again. A handler error never ends Receive.
+// fails to send; and a failed pull, including one that ends empty while the
+// connection is down, after which the source reports not ready until a
+// pull succeeds again. A handler error never ends Receive.
 func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) error {
 	c := s.b.conn.Load()
 	if c == nil {
@@ -119,20 +120,29 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 			s.ready.Store(true)
 			s.deliver(ctx, msg, fn)
 		case ctx.Err() != nil:
-		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, natsgo.ErrTimeout), errors.Is(err, jetstream.ErrNoMessages):
-			// An empty pull is a healthy one.
+		case empty(err) && c.nc.IsConnected():
+			// An empty pull is a healthy one, while the connection is up.
 			failures = 0
 			s.ready.Store(true)
 		case errors.Is(err, natsgo.ErrConnectionClosed), errors.Is(err, jetstream.ErrConsumerDeleted):
 			return fmt.Errorf("nats: receive %s: %w", s.sub.Name, err)
+		case empty(err) && c.nc.IsClosed():
+			return fmt.Errorf("nats: receive %s: %w", s.sub.Name, natsgo.ErrConnectionClosed)
 		default:
 			// Most failures pass, such as a reconnect or a leader election.
-			// A deleted consumer or stream does not: its pulls fail with no
-			// responders, so after a few failures the member asks the server.
+			// While the connection is down, the client buffers the pull
+			// request and nothing answers, so the pull ends as an empty one
+			// would: that is a failure too, named for the connection's state.
+			// A deleted consumer or stream does not pass: its pulls fail
+			// with no responders, so after a few failures the member asks
+			// the server, which it can only do while connected.
+			if empty(err) {
+				err = fmt.Errorf("connection %s: %w", c.nc.Status(), err)
+			}
 			s.ready.Store(false)
 			s.reportf(ctx, "pull: %w", err)
 			failures++
-			if errors.Is(err, natsgo.ErrNoResponders) || failures >= failuresBeforeCheck {
+			if c.nc.IsConnected() && (errors.Is(err, natsgo.ErrNoResponders) || failures >= failuresBeforeCheck) {
 				if gone := s.gone(ctx, cons); gone != nil {
 					return fmt.Errorf("nats: receive %s: %w", s.sub.Name, gone)
 				}
@@ -144,6 +154,11 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 		}
 	}
 	return nil
+}
+
+// empty reports whether err is how a pull that found no message ends.
+func empty(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, natsgo.ErrTimeout) || errors.Is(err, jetstream.ErrNoMessages)
 }
 
 // gone returns the error that says cons or its stream no longer exists, or
