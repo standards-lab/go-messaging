@@ -4,6 +4,12 @@
 # own engine or provider dependencies.
 version: "2"
 
+# The integration suite compiles under its build tag, so the check lints it
+# without a database.
+run:
+  build-tags:
+    - integration
+
 linters:
   # The standard set (errcheck, govet, ineffassign, staticcheck, unused),
   # plus testpackage, which keeps tests black-box. Its skip regexp is

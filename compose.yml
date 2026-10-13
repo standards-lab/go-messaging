@@ -1,0 +1,8 @@
+# go-messaging's test-only harness: PostgreSQL for the postgres module's
+# integration suite. The service builds from compose/postgres/Dockerfile,
+# which pins its image and carries its configuration and health check. It
+# keeps its data in tmpfs, so every start begins empty.
+name: go-messaging
+
+include:
+  - compose/postgres.yml
