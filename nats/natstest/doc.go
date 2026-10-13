@@ -3,7 +3,8 @@
 //
 // The package exports:
 //
-//   - [Open], which returns the server MESSAGING_NATS_URL names
+//   - [Open], which returns the server MESSAGING_NATS_URL names, and fails
+//     the test when it is unset
 //   - [Scratch], which returns a stream name and subject prefix unique to
 //     the test on any server, and deletes the stream when the test ends
 //
@@ -12,5 +13,6 @@
 // choosing. The names follow pgtest's: Open reads the environment, and
 // Scratch takes the server. Scratch creates nothing: the broker the test
 // points at the stream provisions it, and Scratch's cleanup, registered
-// first, runs after that broker's own.
+// first, runs after that broker's own. A stream nothing created is
+// tolerated.
 package natstest

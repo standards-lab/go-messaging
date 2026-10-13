@@ -19,8 +19,6 @@ driver, no dialect, no broker client. depguard holds the base to that line in `m
 engine's driver and dialect enter only through its sub-module, and a broker's client only through
 its provider's.
 
-The `nats` sub-module is a scaffold: the JetStream provider is not built yet.
-
 ## Packages
 
 - `messaging` (the root) is the broker contract and the runtime: `Broker` and `Publisher`,
@@ -35,7 +33,9 @@ The `nats` sub-module is a scaffold: the JetStream provider is not built yet.
 - `postgres` (sub-module) is the PostgreSQL engine: the outbox's and inbox's statements, the
   `messaging` migration set, `Verify`, and `Pending`. Its `pgtest` package gives each test a
   throwaway database.
-- `nats` (sub-module) is reserved for the NATS JetStream provider.
+- `nats` (sub-module) is the NATS JetStream provider: the `Broker` on one stream, its `Config`
+  block with the stream's owner switch, and the durable pull consumers its sources bind. Its
+  `natstest` package gives each test its own stream.
 
 The package documentation, `go doc github.com/standards-lab/go-messaging/...`, is the reference
 for each exported name; each package's `doc.go` inventories its exports.
@@ -58,8 +58,7 @@ rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutd
 ```
 
 `broker` is any `messaging.Broker`: `memory.New()` in a test, and in production the NATS JetStream
-provider once the `nats` sub-module, a scaffold today, delivers it.
-`shutdown` is the process's drain timeout, within which every reactor the runtime builds drains.
+provider, below. `shutdown` is the process's drain timeout, within which every reactor the runtime builds drains.
 Error handling is elided throughout.
 
 A domain emits through `rt.Recorder`, in its command's own transaction, so an event is written
@@ -72,6 +71,38 @@ _, err := sqlate.Transact(ctx, db, rt.Recorder.Emit(ctx, func(tx *sqlate.Tx, q *
 	return struct{}{}, nil
 }))
 ```
+
+### The NATS broker
+
+The `nats` sub-module's `Broker` publishes to one JetStream stream and subscribes durable pull
+consumers on it. Its `Config` is the service's `nats` block, finalized as the messaging block is:
+
+```go
+owner := true // the one service that owns the stream; every other leaves Owner nil
+ncfg := nats.Config{Stream: "billing", Prefix: "billing", Owner: &owner}
+err := ncfg.Finalize("BILLING") // defaults url, reads BILLING_NATS_*, and validates
+
+broker, err := nats.New(ncfg) // no I/O: Start connects, at the lowest stage
+```
+
+One service owns a stream: it sets `owner` true, and its `Start` creates the stream or updates it
+to its config, with the subjects `<prefix>.>`, the deduplication window `duplicates`, and the
+retention `max_age`. Every other service on the stream leaves `owner` unset or false: its broker
+binds the stream as it finds it and writes nothing, and its `Start` fails when the stream is
+missing or does not capture its prefix. Only the owner sets `duplicates` and `max_age`; a
+non-owner that sets either fails validation, naming the field. In JSON:
+
+```json
+{"nats": {"url": "nats://nats:4222", "stream": "billing", "prefix": "billing", "owner": true, "max_age": "168h"}}
+```
+
+```json
+{"nats": {"url": "nats://nats:4222", "stream": "billing", "prefix": "billing"}}
+```
+
+The broker is a lifecycle node of the graph, started before every reactor on it; a call that
+reaches it before `Start` fails with `nats.ErrNotStarted`. `broker.Conn()` is the native
+connection, for request and reply in the composition root.
 
 ### The relay and consumers as graph nodes
 
@@ -120,8 +151,9 @@ The failures the relay and the consumers survive, which no caller sees as an err
 runtime's hook, each as a `messaging.Failure` whose `Kind` names what failed: `relay` (a pass
 ended by a transient publish failure or a database error), `quarantine`, `source` (an error a
 consumer's source survived), or `exhausted`. Without a hook, the runtime logs each failure at warn
-as `messaging failure`. The default logs every failure it is given, about four a second during an
-outage at the default poll, so a service that wants failures throttled, counted, or alerted on
+as `messaging failure`. The default logs every failure it is given: during an outage, about four a
+second from the relay at the default poll, and from each consumer member on the NATS broker one
+failed pull about every 1.1 seconds, so a service that wants failures throttled, counted, or alerted on
 sets its own:
 
 ```go
@@ -176,19 +208,23 @@ The repository is a Go workspace of three modules, `.`, `postgres`, and `nats`. 
 [mise](https://mise.jdx.dev):
 
 ```sh
-mise run check         # build, vet, format, fix, tidy, test, and lint every module, then sqlint; writes nothing
-mise run integration   # the postgres module's integration suite against a fresh compose PostgreSQL
-mise run currency      # report requirements, Go, tools, actions, and images behind their latest
-mise run upgrade       # upgrade every module's go directive and requirements, and the tools, to their latest
-mise run up            # start the compose PostgreSQL and wait until it is healthy
-mise run down          # stop it, discarding its data
+mise run check                 # build, vet, format, fix, tidy, test, and lint every module, then sqlint; writes nothing
+mise run integration:postgres  # the postgres module's integration suite against a fresh compose PostgreSQL
+mise run integration:nats      # the nats module's integration suite against a fresh compose NATS
+mise run integration           # both suites, each against its own fresh service
+mise run currency              # report requirements, Go, tools, actions, and images behind their latest
+mise run upgrade               # upgrade every module's go directive and requirements, and the tools, to their latest
+mise run up                    # start every compose service and wait until each is healthy
+mise run down                  # stop them, discarding their data
 ```
 
 The check builds each module with the workspace off, so each resolves its own pins. `compose.yml`
-runs PostgreSQL on port 5435; `POSTGRES_PORT` moves it, and `MESSAGING_DSN` in `mise.toml`
-follows. The integration suite keeps its data in tmpfs and gives each test its own database. CI
-runs the check on every pull request and push to main, and the integration suite on push to main
-and on manual dispatch.
+runs PostgreSQL on port 5435 and NATS with JetStream on port 4225; `POSTGRES_PORT` and
+`NATS_PORT` move them, and `MESSAGING_DSN` and `MESSAGING_NATS_URL` in `mise.toml` follow. Each
+integration task starts only its own service and stops it whatever the result. Both services
+keep their data in tmpfs; the postgres suite gives each test its own database, and the nats suite
+its own stream. CI runs the check on every pull request and push to main, and both integration
+suites on push to main and on manual dispatch.
 
 ## Releases
 
