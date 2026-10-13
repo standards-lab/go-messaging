@@ -1,0 +1,119 @@
+[tools]
+go = "1.27.2"
+golangci-lint = "2.14.0"
+jq = "1.8.2"
+
+# Space-separated list of module directories, kept in sync with the go.work
+# use-list. "." is the base module; postgres is the database engine
+# sub-module and nats the broker provider sub-module. The maintenance tasks
+# below skip a directory without a go.mod; check, currency, and upgrade
+# require one.
+[env]
+GO_MODULES = ". postgres nats"
+
+# The one check: read-only and deterministic, stopping at the first failure.
+# Each module builds with the workspace off, proving it resolves its own
+# pins standalone, and lints under the .golangci.yml nearest it.
+[tasks.check]
+description = "Build, vet, format, fix, tidy, test, and lint every module; writes nothing"
+run = '''
+set -eu
+export GOWORK=off
+for mod in $GO_MODULES; do
+  echo "check: $mod"
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go build ./...
+  go vet ./...
+  unformatted=$(gofmt -l .)
+  if [ -n "$unformatted" ]; then echo "gofmt: unformatted files:"; echo "$unformatted"; exit 1; fi
+  go fix -diff ./...
+  go mod tidy -diff
+  go test -race ./...
+  golangci-lint run ./...
+done
+'''
+
+# Currency: report what trails its latest, and the convenience that upgrades it.
+[tasks.currency]
+description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
+run = "scripts/currency.sh"
+
+[tasks.upgrade]
+description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+run = '''
+set -eu
+export GOWORK=off
+# The go directive follows the current Go minor, with no toolchain line.
+go_minor=$(mise latest go | cut -d. -f1,2)
+for mod in $GO_MODULES; do
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go mod edit -go="$go_minor" -toolchain=none
+  direct=$(go mod edit -json | jq -r '.Require[]? | select(.Indirect | not) | .Path')
+  [ -z "$direct" ] || go get $(printf '%s@latest ' $direct)
+  go mod tidy
+done
+cd "$MISE_PROJECT_ROOT"
+mise upgrade --bump --local
+'''
+
+# Maintenance.
+[tasks.tidy]
+description = "Run go mod tidy across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> tidy: $mod"
+  (cd "$mod" && go mod tidy)
+done
+'''
+
+# Verification.
+[tasks.fmt]
+description = "Format all Go source"
+run = "gofmt -w ."
+
+[tasks.lint]
+description = "Run golangci-lint across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> lint: $mod"
+  (cd "$mod" && golangci-lint run ./...)
+done
+'''
+
+[tasks.build]
+description = "Build each module with the workspace off, proving it resolves its own pins standalone"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> build (GOWORK=off): $mod"
+  (cd "$mod" && GOWORK=off go build ./...)
+done
+'''
+
+[tasks.vet]
+description = "Run go vet across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> vet: $mod"
+  (cd "$mod" && go vet ./...)
+done
+'''
+
+# Testing.
+[tasks.test]
+description = "Run the unit tier across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  [ -f "$mod/go.mod" ] || continue
+  echo "==> test: $mod"
+  (cd "$mod" && go test -race ./...)
+done
+'''

@@ -1,0 +1,17 @@
+# golangci-lint v2 configuration for the nats sub-module, run by
+# `mise run check`. It is the root configuration without depguard: the
+# import allowlist holds the base module only, and a sub-module brings its
+# own engine or provider dependencies.
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused),
+  # plus testpackage, which keeps tests black-box. Its skip regexp is
+  # narrowed to export_test.go, the one white-box file allowed, which only
+  # exports a clock or probe hook the black-box tests use.
+  default: standard
+  enable:
+    - testpackage
+  settings:
+    testpackage:
+      skip-regexp: export_test\.go
