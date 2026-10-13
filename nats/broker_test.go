@@ -1,0 +1,147 @@
+package nats_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"testing"
+	"time"
+
+	"github.com/standards-lab/go-core/event"
+
+	"github.com/standards-lab/go-messaging"
+	"github.com/standards-lab/go-messaging/nats"
+)
+
+// closedURL is a NATS URL on a loopback port nothing listens on.
+func closedURL(t *testing.T) string {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := lis.Addr().(*net.TCPAddr).Port
+	if err := lis.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("nats://127.0.0.1:%d", port)
+}
+
+func newBroker(t *testing.T, url string) *nats.Broker {
+	t.Helper()
+	b, err := nats.New(nats.Config{URL: url, Stream: "test", Prefix: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// New rejects a config Validate rejects.
+func TestNewValidates(t *testing.T) {
+	_, err := nats.New(nats.Config{URL: "u", Stream: "s", Prefix: "p", MaxAge: 1})
+	if err == nil {
+		t.Fatal("New accepted a non-owner's max_age")
+	}
+}
+
+// Before Start, the broker is not ready and has no connection, and a
+// publish or a receive fails rather than reach a connection that does not
+// exist; the coordinator's stage order keeps both from happening in a
+// process.
+func TestBrokerBeforeStart(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	if b.Ready() {
+		t.Error("an unstarted broker is ready")
+	}
+	if b.Conn() != nil {
+		t.Error("an unstarted broker has a connection")
+	}
+	if err := b.Publish(t.Context(), event.Event{ID: "1", Source: "/test", Type: "t"}); !errors.Is(err, nats.ErrNotStarted) {
+		t.Errorf("Publish = %v, want ErrNotStarted", err)
+	}
+	if err := b.Shutdown(t.Context()); err != nil {
+		t.Errorf("Shutdown of an unstarted broker = %v", err)
+	}
+
+	src, err := b.Subscribe(messaging.Subscription{Name: "orders"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Ready() {
+		t.Error("a source is ready before it receives")
+	}
+	err = src.Receive(t.Context(), func(context.Context, event.Event) error { return nil })
+	if !errors.Is(err, nats.ErrNotStarted) {
+		t.Errorf("Receive = %v, want ErrNotStarted", err)
+	}
+}
+
+// Subscribe validates the subscription.
+func TestBrokerSubscribeValidates(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for name, sub := range map[string]messaging.Subscription{
+		"no name":          {},
+		"dotted name":      {Name: "not.a.token"},
+		"wildcard type":    {Name: "orders", Types: []string{"a.*"}},
+		"negative ackwait": {Name: "orders", AckWait: -1},
+	} {
+		if _, err := b.Subscribe(sub, nil); err == nil {
+			t.Errorf("%s: Subscribe accepted %+v", name, sub)
+		}
+	}
+}
+
+// A broker whose server is unreachable fails its Start, which fails the
+// process's startup, stays not ready, and can start again.
+func TestBrokerStartFailsWithoutNATS(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := b.Start(ctx); err == nil {
+		t.Fatal("Start succeeded against a closed port")
+	}
+	if b.Ready() || b.Conn() != nil {
+		t.Error("a broker that failed to start is ready, or has a connection")
+	}
+	if err := b.Start(ctx); err == nil || errors.Is(err, nats.ErrStarted) {
+		t.Errorf("a Start after a failed one = %v, want the connection's failure", err)
+	}
+}
+
+// A Start while another is in progress fails with ErrStarted. The server is
+// a listener that accepts and never speaks, so the first Start waits for its
+// deadline.
+func TestBrokerStartWhileStarting(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lis.Close() })
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, err := lis.Accept()
+		if err == nil {
+			accepted <- c
+		}
+	}()
+
+	b := newBroker(t, "nats://"+lis.Addr().String())
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	first := make(chan error, 1)
+	go func() { first <- b.Start(ctx) }()
+
+	select {
+	case c := <-accepted:
+		t.Cleanup(func() { _ = c.Close() })
+	case <-ctx.Done():
+		t.Fatal("the first Start never connected")
+	}
+	if err := b.Start(ctx); !errors.Is(err, nats.ErrStarted) {
+		t.Errorf("a Start while another is in progress = %v, want ErrStarted", err)
+	}
+	if err := <-first; err == nil {
+		t.Fatal("Start succeeded against a server that never speaks")
+	}
+}
