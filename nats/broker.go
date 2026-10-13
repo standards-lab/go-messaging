@@ -13,7 +13,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/standards-lab/go-core/event"
-	"github.com/standards-lab/go-core/reactor"
 	"github.com/standards-lab/go-messaging"
 )
 
@@ -203,10 +202,6 @@ func (b *Broker) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// errUnimplemented is the failure of a call whose body a later slice of the
-// nats task ports; it is removed with the last of them.
-var errUnimplemented = errors.New("nats: not implemented")
-
 // Publish publishes e in binary content mode to Prefix.<type>, with its
 // source and id as Nats-Msg-Id, and returns once the stream holds it. A
 // repeat of a source and id within the stream's deduplication window is
@@ -255,28 +250,3 @@ func carriable(h event.Header) error {
 
 // subject is the subject an event of type typ is published to.
 func (b *Broker) subject(typ string) string { return b.cfg.Prefix + "." + typ }
-
-// Subscribe validates sub and returns a source on it. The source passes
-// report each error it survives; a nil report discards them.
-func (b *Broker) Subscribe(sub messaging.Subscription, _ messaging.Report) (reactor.Source[event.Event], error) {
-	if err := sub.Validate(); err != nil {
-		return nil, err
-	}
-	return &source{b: b}, nil
-}
-
-// source is one member of a durable consumer: the loop a reactor runs.
-type source struct {
-	b *Broker
-}
-
-// Receive fails with [ErrNotStarted] before the broker's Start.
-func (s *source) Receive(_ context.Context, _ reactor.Func[event.Event]) error {
-	if s.b.conn.Load() == nil {
-		return ErrNotStarted
-	}
-	return errUnimplemented
-}
-
-// Ready reports whether the source is receiving.
-func (s *source) Ready() bool { return false }
