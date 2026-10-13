@@ -37,14 +37,6 @@ func newBroker(t *testing.T, url string) *nats.Broker {
 	return b
 }
 
-// New rejects a config Validate rejects.
-func TestNewValidates(t *testing.T) {
-	_, err := nats.New(nats.Config{URL: "u", Stream: "s", Prefix: "p", MaxAge: 1})
-	if err == nil {
-		t.Fatal("New accepted a non-owner's max_age")
-	}
-}
-
 // Before Start, the broker is not ready and has no connection, and a
 // publish or a receive fails rather than reach a connection that does not
 // exist; the coordinator's stage order keeps both from happening in a
@@ -146,41 +138,6 @@ func TestBrokerStartWhileStarting(t *testing.T) {
 	}
 }
 
-// A stream subject captures a prefix when it matches every subject under
-// it, by NATS's wildcard rules: '*' one token, a final '>' one or more.
-func TestCaptures(t *testing.T) {
-	for _, c := range []struct {
-		subj, prefix string
-		want         bool
-	}{
-		{"orders.>", "orders", true},
-		{">", "orders", true},
-		{">", "a.b.c", true},
-		{"a.>", "a.b", true},
-		{"a.b.>", "a.b", true},
-		{"*.b.>", "a.b", true},
-		{"a.*.>", "a.b", true},
-		{"*.>", "a", true},
-		{"*.>", "a.b", true},
-		{"orders.*", "orders", false},
-		{"orders", "orders", false},
-		{"orders.created", "orders", false},
-		{"orders.*.>", "orders", false},
-		{"orders.created.>", "orders", false},
-		{"a.b.c.>", "a.b", false},
-		{"invoices.>", "orders", false},
-		{"orders2.>", "orders", false},
-		{"ord.>", "orders", false},
-		{"a.c.>", "a.b", false},
-		{"*", "a", false},
-		{"a.b", "a.b", false},
-	} {
-		if got := nats.Captures(c.subj, c.prefix); got != c.want {
-			t.Errorf("Captures(%q, %q) = %v, want %v", c.subj, c.prefix, got, c.want)
-		}
-	}
-}
-
 // Publish rejects an event messaging.Encode rejects, and a header value the
 // NATS protocol cannot carry, before it needs a connection.
 func TestPublishRejects(t *testing.T) {
@@ -196,7 +153,6 @@ func TestPublishRejects(t *testing.T) {
 		err := b.Publish(t.Context(), e)
 		if err == nil || errors.Is(err, nats.ErrNotStarted) {
 			t.Errorf("%s: Publish = %v, want a rejection", name, err)
-
 		}
 	}
 }

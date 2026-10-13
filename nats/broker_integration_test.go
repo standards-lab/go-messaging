@@ -23,12 +23,6 @@ import (
 // failsafe bounds each server call a test makes.
 const failsafe = 10 * time.Second
 
-// owner is the Owner switch set to true.
-func owner() *bool {
-	yes := true
-	return &yes
-}
-
 // newConfigured builds a broker on cfg, named for the test.
 func newConfigured(t *testing.T, cfg nats.Config) *nats.Broker {
 	t.Helper()
@@ -122,7 +116,7 @@ func publish(t *testing.T, b *nats.Broker, e event.Event) {
 func TestBrokerStarts(t *testing.T) {
 	url := natstest.Open(t)
 	stream, prefix := natstest.Scratch(t, url)
-	b := newConfigured(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: owner()})
+	b := newConfigured(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
 	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
 	defer cancel()
 	if err := b.Start(ctx); err != nil {
@@ -157,7 +151,7 @@ func TestOwnerProvisionsRetention(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			stream, prefix := natstest.Scratch(t, url)
 			started(t, nats.Config{
-				URL: url, Stream: stream, Prefix: prefix, Owner: owner(),
+				URL: url, Stream: stream, Prefix: prefix, Owner: new(true),
 				Duplicates: config.Duration(c.duplicates), MaxAge: config.Duration(c.maxAge),
 			})
 			got := streamInfo(t, js, stream).Config
@@ -187,11 +181,11 @@ func TestSecondOwnerConverges(t *testing.T) {
 	js := jetStream(t, url)
 	stream, prefix := natstest.Scratch(t, url)
 	started(t, nats.Config{
-		URL: url, Stream: stream, Prefix: prefix, Owner: owner(),
+		URL: url, Stream: stream, Prefix: prefix, Owner: new(true),
 		Duplicates: config.Duration(time.Minute), MaxAge: config.Duration(time.Hour),
 	})
 	started(t, nats.Config{
-		URL: url, Stream: stream, Prefix: prefix, Owner: owner(),
+		URL: url, Stream: stream, Prefix: prefix, Owner: new(true),
 		Duplicates: config.Duration(3 * time.Minute), MaxAge: config.Duration(2 * time.Hour),
 	})
 	got := streamInfo(t, js, stream).Config
@@ -207,7 +201,7 @@ func TestNonOwnerBinds(t *testing.T) {
 	js := jetStream(t, url)
 	stream, prefix := natstest.Scratch(t, url)
 	own := started(t, nats.Config{
-		URL: url, Stream: stream, Prefix: prefix, Owner: owner(),
+		URL: url, Stream: stream, Prefix: prefix, Owner: new(true),
 		Duplicates: config.Duration(time.Minute), MaxAge: config.Duration(time.Hour),
 	})
 	before := streamInfo(t, js, stream).Config
@@ -237,17 +231,35 @@ func TestNonOwnerBinds(t *testing.T) {
 	}
 }
 
-// A non-owner binds a stream whose subject is broader than its own prefix's
-// Prefix.>, here its parent's .>.
-func TestNonOwnerBindsBroaderSubject(t *testing.T) {
+// A non-owner binds a stream one of whose subjects captures every subject
+// under its prefix, by NATS's wildcard rules: '*' one token, a final '>' one
+// or more. Each stream's subjects sit under the scratch prefix, so no two
+// tests' streams overlap; the broker's prefix is two tokens below it.
+func TestNonOwnerBindsCapturingSubject(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
-	stream, prefix := natstest.Scratch(t, url)
-	createStream(t, js, stream, prefix+".>")
-	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix + ".orders"})
-	publish(t, b, event.Event{ID: "1", Source: "/test", Type: "created"})
-	if n := streamInfo(t, js, stream).State.Msgs; n != 1 {
-		t.Errorf("stream holds %d messages, want 1", n)
+	for name, sfx := range map[string][]string{
+		"its own .>":        {".a.b.>"},
+		"its parent's .>":   {".a.>"},
+		"an ancestor's .>":  {".>"},
+		"'*' for its last":  {".a.*.>"},
+		"'*' for its first": {".*.b.>"},
+		"'*' then '>'":      {".*.>"},
+		"one of several":    {".x.>", ".a.b.>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stream, prefix := natstest.Scratch(t, url)
+			var subjects []string
+			for _, s := range sfx {
+				subjects = append(subjects, prefix+s)
+			}
+			createStream(t, js, stream, subjects...)
+			b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix + ".a.b"})
+			publish(t, b, event.Event{ID: "1", Source: "/test", Type: "created"})
+			if n := streamInfo(t, js, stream).State.Msgs; n != 1 {
+				t.Errorf("stream on %q holds %d messages, want 1", subjects, n)
+			}
+		})
 	}
 }
 
@@ -274,7 +286,7 @@ func TestNonOwnerStartFailsOnMissingStream(t *testing.T) {
 		t.Errorf("stream after the non-owner's Start: err %v, want ErrStreamNotFound", err)
 	}
 
-	started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: owner()})
+	started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
 	if err := b.Start(ctx); err != nil {
 		t.Fatalf("Start once the stream exists: %v", err)
 	}
@@ -285,15 +297,21 @@ func TestNonOwnerStartFailsOnMissingStream(t *testing.T) {
 }
 
 // A non-owner's Start fails on a stream none of whose subjects captures
-// every subject under its prefix.
+// every subject under its prefix, laid out as in
+// TestNonOwnerBindsCapturingSubject.
 func TestNonOwnerStartFailsOnUncapturedPrefix(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
 	for name, sfx := range map[string][]string{
-		"narrower":          {".orders.>"},
-		"one token":         {".*"},
-		"fixed subjects":    {".created", ".deleted"},
-		"two narrower ones": {".a.>", ".b.>"},
+		"narrower":           {".a.b.c.>"},
+		"two narrower ones":  {".a.b.c.>", ".a.b.d.>"},
+		"'*' after it":       {".a.b.*.>"},
+		"one token after it": {".a.b.*"},
+		"fixed subjects":     {".a.b.created", ".a.b.deleted"},
+		"itself, fixed":      {".a.b"},
+		"'*' for its last":   {".a.*"},
+		"a sibling":          {".a.c.>"},
+		"a longer token":     {".a.bb.>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			stream, prefix := natstest.Scratch(t, url)
@@ -302,13 +320,13 @@ func TestNonOwnerStartFailsOnUncapturedPrefix(t *testing.T) {
 				subjects = append(subjects, prefix+s)
 			}
 			createStream(t, js, stream, subjects...)
-			b := newConfigured(t, nats.Config{URL: url, Stream: stream, Prefix: prefix})
+			b := newConfigured(t, nats.Config{URL: url, Stream: stream, Prefix: prefix + ".a.b"})
 			ctx, cancel := context.WithTimeout(t.Context(), failsafe)
 			defer cancel()
 			err := b.Start(ctx)
 			if err == nil {
 				shutdown(t, b)
-				t.Fatalf("Start bound a stream on %q for prefix %s", subjects, prefix)
+				t.Fatalf("Start bound a stream on %q for prefix %s.a.b", subjects, prefix)
 			}
 			t.Logf("Start: %v", err)
 			if b.Ready() || b.Conn() != nil {
@@ -323,7 +341,7 @@ func TestNonOwnerStartFailsOnUncapturedPrefix(t *testing.T) {
 func TestSecondStartFails(t *testing.T) {
 	url := natstest.Open(t)
 	stream, prefix := natstest.Scratch(t, url)
-	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: owner()})
+	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
 	first := b.Conn()
 	if err := b.Start(t.Context()); !errors.Is(err, nats.ErrStarted) {
 		t.Errorf("second Start = %v, want ErrStarted", err)
@@ -340,7 +358,7 @@ func TestPublishDedups(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
 	stream, prefix := natstest.Scratch(t, url)
-	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: owner()})
+	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
 
 	e := event.Event{ID: "b1", Source: "/a", Type: "orders.created", DataContentType: "application/json", Data: []byte(`{"n":1}`)}
 	publish(t, b, e)
