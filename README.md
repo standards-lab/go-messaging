@@ -56,7 +56,8 @@ set, err := postgres.Migrations() // the messaging set: messaging_outbox and mes
 rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutdown, logger)
 ```
 
-`broker` is any `messaging.Broker`: `memory.New()` in a test, the NATS provider in production.
+`broker` is any `messaging.Broker`: `memory.New()` in a test, and in production the NATS JetStream
+provider once the `nats` sub-module, a scaffold today, delivers it.
 `shutdown` is the process's drain timeout, within which every reactor the runtime builds drains.
 Error handling is elided throughout.
 
