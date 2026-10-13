@@ -22,10 +22,11 @@ jobs:
         run: mise run check
 
   # The integration tier: the postgres module's suite against the
-  # repository's compose PostgreSQL, the same definition a developer runs. On
-  # push to main and on demand, below the per-PR unit rate by design; a
-  # release is cut only from a main whose run has passed. The task starts the
-  # server, prints its log on a failure, and stops it itself.
+  # repository's compose PostgreSQL and the nats module's suite against its
+  # compose NATS, the same definition a developer runs. On push to main and
+  # on demand, below the per-PR unit rate by design; a release is cut only
+  # from a main whose run has passed. Each suite's task starts its server,
+  # prints its log on a failure, and stops it itself.
   integration:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
