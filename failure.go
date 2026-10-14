@@ -14,8 +14,9 @@ type FailureKind string
 
 const (
 	// FailureRelay is a relay pass that ended on an error: a transient
-	// publish failure, after which the next pass retries the event, or a
-	// database error.
+	// publish failure, after which the next pass retries the event, a
+	// database error, or, under [Gated], the gate's failure other than its
+	// wait ending.
 	FailureRelay FailureKind = "relay"
 	// FailureQuarantine is an outbox row the relay quarantined, committed
 	// by the time it is reported: the row does not decode, or its publish
@@ -51,7 +52,7 @@ type Failure struct {
 	Attempt int
 	// Err is the failure itself: the handler's error, the error the source
 	// reported, or the relay's report, an [*outbox.QuarantineError], an
-	// [*outbox.PublishError], or a database error.
+	// [*outbox.PublishError], a database error, or a gate's error.
 	Err error
 }
 

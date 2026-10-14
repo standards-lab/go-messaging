@@ -25,11 +25,13 @@ func Open(t testing.TB) string {
 	return url
 }
 
-// Scratch returns a stream name, messaging_test_<hex>, and a subject
-// prefix, messaging.test.<hex>, unique to the test, which pass
+// Scratch returns a stream name, messaging_test_<hex>, and a type
+// namespace, messaging.test.<hex>, unique to the test, which pass
 // messaging.CheckName and messaging.CheckType, as a broker's Config
-// requires. It creates nothing. When the test ends it deletes the stream on
-// url's server, tolerating one that nothing created.
+// requires of its Stream and Prefix. A broker publishes an event with its
+// type as the subject, so the test's event types are under the namespace:
+// prefix+".thing.happened". It creates nothing. When the test ends it
+// deletes the stream on url's server, tolerating one that nothing created.
 func Scratch(t testing.TB, url string) (stream, prefix string) {
 	t.Helper()
 	sfx := suffix(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -38,20 +39,27 @@ const (
 	failuresBeforeCheck = 3
 )
 
-// Subscribe validates sub and returns a source that binds its durable
-// consumer at its first Receive. The source passes report each error it
-// survives; a nil report discards them.
+// Subscribe validates sub, and that each of its types is under Prefix, as
+// every type the stream captures is, and returns a source that binds its
+// durable consumer at its first Receive. The source passes report each
+// error it survives; a nil report discards them.
 func (b *Broker) Subscribe(sub messaging.Subscription, report messaging.Report) (reactor.Source[event.Event], error) {
 	if err := sub.Validate(); err != nil {
 		return nil, err
+	}
+	for _, t := range sub.Types {
+		if err := b.namespaced(t); err != nil {
+			return nil, fmt.Errorf("nats: subscribe %s: %w", sub.Name, err)
+		}
 	}
 	sub = sub.Normalize()
 	return &source{b: b, sub: sub, cfg: b.consumerConfig(sub), report: report}, nil
 }
 
-// consumerConfig is the durable consumer the normalized sub describes. It
-// is derived the same way for every member, so members of a Name bind one
-// consumer, and a different subscription under the Name fails to bind.
+// consumerConfig is the durable consumer the normalized sub describes, its
+// filter subjects the subscription's types, since each type is its subject.
+// It is derived the same way for every member, so members of a Name bind
+// one consumer, and a different subscription under the Name fails to bind.
 func (b *Broker) consumerConfig(sub messaging.Subscription) jetstream.ConsumerConfig {
 	maxDeliver := sub.MaxDeliver
 	if maxDeliver == 0 {
@@ -67,9 +75,8 @@ func (b *Broker) consumerConfig(sub messaging.Subscription) jetstream.ConsumerCo
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       sub.AckWait + AckMargin,
 		MaxDeliver:    maxDeliver,
-	}
-	for _, t := range sub.Types {
-		cfg.FilterSubjects = append(cfg.FilterSubjects, b.subject(t))
+		// A clone, so the consumer's config shares no array with sub.
+		FilterSubjects: slices.Clone(sub.Types),
 	}
 	return cfg
 }

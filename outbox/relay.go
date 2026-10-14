@@ -45,6 +45,30 @@ func Drain(d time.Duration) RelayOption {
 	return func(r *Relay) { r.drain = d }
 }
 
+// Gate is what a relay holds while it handles each row: a quiesce gate,
+// such as go-core's [reactor.Gate], held shared by background work and
+// exclusively by an operation that must run with that work paused. Shared
+// waits until the gate admits a shared holder and returns its release, or
+// fails, holding nothing; a wait ctx ends returns ctx's error.
+type Gate interface {
+	Shared(ctx context.Context) (release func(), err error)
+}
+
+var _ Gate = (*reactor.Gate)(nil)
+
+// Gated sets the gate the relay holds shared for each row, from before the
+// row's transaction begins until it commits or rolls back, so an exclusive
+// holder of g never runs beside a relay's transaction. A relay waiting on
+// g opens no transaction and claims no row. The wait honors the context
+// the row is claimed under, Receive's or the last pass's, so a wait the
+// stop or the drain ends claims nothing and reports nothing. Any other
+// failure of g ends the pass and is reported, wrapped, but leaves the
+// relay ready, since it is not the database's. A nil g, the default,
+// leaves the relay ungated.
+func Gated(g Gate) RelayOption {
+	return func(r *Relay) { r.gate = g }
+}
+
 // Relay is the source of the outbox's committed, unpublished events. A
 // composition root runs it into a reactor whose handler publishes each
 // event to the broker.
@@ -75,6 +99,7 @@ type Relay struct {
 	poll    time.Duration
 	timeout time.Duration
 	drain   time.Duration
+	gate    Gate
 	report  func(context.Context, error)
 	ready   atomic.Bool
 }
@@ -164,8 +189,17 @@ func (r *Relay) settle(ctx context.Context, err error) bool {
 	}
 	r.report(ctx, err)
 	_, published := errors.AsType[*PublishError](err)
-	return published || ctx.Err() != nil
+	_, gated := errors.AsType[*gateError](err)
+	return published || gated || ctx.Err() != nil
 }
+
+// gateError is a [Gated] relay's failure to hold its gate other than the
+// wait's context ending: reported, but not the database's failure.
+type gateError struct{ err error }
+
+func (e *gateError) Error() string { return "outbox: relay: gate: " + e.err.Error() }
+
+func (e *gateError) Unwrap() error { return e.err }
 
 // pass handles rows until none is left, returning nil, or until one fails.
 func (r *Relay) pass(ctx context.Context, fn reactor.Func[event.Event]) error {
@@ -180,6 +214,19 @@ func (r *Relay) pass(ctx context.Context, fn reactor.Func[event.Event]) error {
 
 // next handles the oldest unclaimed row, reporting whether there was one.
 func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled bool, err error) {
+	// The gate is held before the transaction begins and released after it
+	// settles: this defer is registered first, so it runs after the
+	// rollback's. The wait is on ctx, so the stop or the drain ends it.
+	if r.gate != nil {
+		release, err := r.gate.Shared(ctx)
+		if err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return false, err
+			}
+			return false, &gateError{err: err}
+		}
+		defer release()
+	}
 	// database/sql rolls a transaction back when the context it began with
 	// ends, so the transaction begins on a context that outlives ctx: a row
 	// claimed before ctx ends is settled, and its handler keeps only its own

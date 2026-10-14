@@ -7,6 +7,21 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-10-14
+
+### Added
+
+- `Gated`, the `Option` that sets a `Gate`, a quiesce gate such as go-core's `reactor.Gate`, which
+  the runtime's reactors hold shared. The relay holds it for each outbox row, from before the
+  row's transaction begins until it commits or rolls back, so a relay waiting on it opens no
+  transaction; a wait the stop or the drain ends claims no row and reports nothing, and any other
+  failure of the gate is reported as a `FailureRelay`. Each delivery a `Consume` reactor handles
+  holds it for the handler's whole call; a wait the drain ends hands the handler nothing and
+  leaves the event for redelivery, and a delivery that waits past `AckWait` is redelivered and
+  counts against `MaxDeliver`. Without `Gated`, the relay and the consumers hold no gate, as in
+  v0.1.0.
+- `outbox.Gate` and the `outbox.Gated` relay option, the relay's side of `Gated`.
+
 ### Changed
 
 - Documentation only: the package documentation names the `nats` sub-module as the NATS
@@ -58,5 +73,6 @@ only; the `postgres` and `nats` sub-modules keep their own.
 - The base module depends on the standard library, go-core, and sqlate and sqlate/query, which
   depguard enforces.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/standards-lab/go-messaging/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/v0.1.0
