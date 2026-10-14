@@ -27,7 +27,8 @@
 //     failed: [FailureRelay], [FailureQuarantine], [FailureSource], or
 //     [FailureExhausted]
 //   - [Hook], which receives each Failure; [Option], which configures a
-//     Runtime; and [OnFailure], the Option that sets the hook
+//     Runtime; [OnFailure], the Option that sets the hook; and [Gated], the
+//     Option that sets the [Gate] the runtime's reactors hold shared
 //
 // # Brokers and subscriptions
 //
@@ -48,11 +49,13 @@
 // [Runtime.Consume] builds a consuming reactor that decodes each event into
 // the consumer's own type and binds its inbox claim. The failures both
 // survive reach the hook [OnFailure] sets, each as a [Failure], and are
-// logged at warn without one. [Config] is the service's messaging
-// configuration block, beside its provider's. The runtime registers
-// nothing: the composition root makes the broker and each reactor a node of
-// its graph, and the coordinator infers from their methods how to start,
-// drain, and watch them.
+// logged at warn without one. Under [Gated], the relay holds a quiesce
+// gate for each outbox row and a consumer for each delivery, so an
+// operation that holds the gate exclusively runs with both paused.
+// [Config] is the service's messaging configuration block, beside its
+// provider's. The runtime registers nothing: the composition root makes the
+// broker and each reactor a node of its graph, and the coordinator infers
+// from their methods how to start, drain, and watch them.
 //
 // # Providers and engines
 //

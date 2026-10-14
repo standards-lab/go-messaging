@@ -23,8 +23,8 @@ its provider's.
 
 - `messaging` (the root) is the broker contract and the runtime: `Broker` and `Publisher`,
   `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`, the
-  `Runtime` with its `Relay` and `Consume` reactors, and the error hook, `Failure`, `Hook`, and
-  `OnFailure`.
+  `Runtime` with its `Relay` and `Consume` reactors, the error hook, `Failure`, `Hook`, and
+  `OnFailure`, and the quiesce gate's `Gate` and `Gated`.
 - `outbox` writes a command's events in the command's own transaction and relays them to the
   broker, quarantining a row that can never be published.
 - `inbox` is a consumer's claim on an event, so a redelivery is handled once.
@@ -201,6 +201,25 @@ the runtime reports an `exhausted` failure with the event's identity and the att
 Exhaustion is seen only from the handler's error. An event whose last delivery overruns
 `AckWait`, with the handler returning nil or returning late, is given up unreported. Size
 `AckWait` above the handler's worst case where an unreported loss matters.
+
+### The quiesce gate
+
+`messaging.Gated` gives the runtime a gate its reactors hold shared, such as go-core's
+`reactor.Gate`, so an operation that holds it exclusively, a restore or a migration, runs with
+the messaging paused:
+
+```go
+var gate reactor.Gate
+rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutdown, logger,
+	messaging.Gated(&gate))
+```
+
+The relay holds the gate for each outbox row, from before the row's transaction begins until it
+commits or rolls back, so while the gate is held exclusively it opens no transaction. Each
+delivery a `Consume` reactor handles holds it for the handler's whole call. A wait the drain ends
+reports nothing: the relay claims no row, and the consumer hands its handler nothing and leaves
+the event for redelivery. A delivery's wait counts against its `AckWait`, so one that waits past
+it is redelivered and counts against `MaxDeliver`. Without `Gated`, nothing holds a gate.
 
 ## Development
 

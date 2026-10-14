@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -39,6 +40,7 @@ type Runtime struct {
 	shutdown time.Duration
 	logger   *slog.Logger
 	hook     Hook
+	gate     Gate
 }
 
 // New builds a service's messaging from cfg, over broker and the engine's
@@ -90,10 +92,13 @@ func New(cfg Config, broker Broker, outboxEngine outbox.Engine, inboxEngine inbo
 // [FailureQuarantine], and each pass a publish failure or a database error
 // ends as a [FailureRelay], with the event's identity when the relay knew
 // it.
+//
+// Under [Gated], the relay holds the gate shared for each row, from before
+// the row's transaction begins until it settles.
 func (r *Runtime) Relay(db sqlate.Beginner) *reactor.Reactor[event.Event] {
 	report := func(ctx context.Context, err error) { r.hook(ctx, relayFailure(err)) }
 	src := r.outbox.Relay(db, r.cfg.RelayPoll.Duration(), report,
-		outbox.Timeout(r.cfg.RelayTimeout.Duration()), outbox.Drain(r.shutdown/4))
+		outbox.Timeout(r.cfg.RelayTimeout.Duration()), outbox.Drain(r.shutdown/4), outbox.Gated(r.gate))
 	publish := func(ctx context.Context, e event.Event) error {
 		if err := r.broker.Publish(ctx, e); err != nil {
 			return err
@@ -133,6 +138,11 @@ type Claim = func(ctx context.Context, tx *sqlate.Tx) (first bool, err error)
 // subscription, a MaxDeliver of 0, exhausts nothing. Exhaustion is seen
 // only from fn's error, so an event whose last delivery overruns AckWait,
 // with fn returning nil or late, is given up unreported.
+//
+// Under [Gated], each delivery holds the gate shared for fn's whole call,
+// and fn is not called until it does. A wait that the drain or the
+// delivery's deadline ends hands fn nothing, logs and reports nothing, and
+// leaves the event to be redelivered.
 func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, data T, claim Claim) error) (*reactor.Reactor[event.Event], error) {
 	report := func(ctx context.Context, err error) {
 		r.hook(ctx, Failure{Kind: FailureSource, Consumer: sub.Name, Err: err})
@@ -142,18 +152,28 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 		return nil, err
 	}
 	handle := func(ctx context.Context, e event.Event) error {
+		release, ended, err := r.share(ctx)
+		if ended {
+			// Nothing was handed over, and the error leaves the event to
+			// the broker's redelivery.
+			return err
+		}
 		var data T
 		repeat := false
-		err := json.Unmarshal(e.Data, &data)
-		if err != nil {
-			err = event.Permanent(fmt.Errorf("decode: %w", err))
-		} else {
-			claim := func(ctx context.Context, tx *sqlate.Tx) (bool, error) {
-				first, err := r.inbox.Claim(ctx, tx, sub.Name, e)
-				repeat = err == nil && !first
-				return first, err
+		// A gate that failed otherwise skips fn, and its error is the
+		// delivery's outcome, as a transient error of fn's would be.
+		if err == nil {
+			defer release()
+			if derr := json.Unmarshal(e.Data, &data); derr != nil {
+				err = event.Permanent(fmt.Errorf("decode: %w", derr))
+			} else {
+				claim := func(ctx context.Context, tx *sqlate.Tx) (bool, error) {
+					first, err := r.inbox.Claim(ctx, tx, sub.Name, e)
+					repeat = err == nil && !first
+					return first, err
+				}
+				err = fn(ctx, data, claim)
 			}
-			err = fn(ctx, data, claim)
 		}
 		attrs := []any{"consumer", sub.Name, "type", e.Type, "event", e.ID, "subject", e.Subject}
 		switch {
@@ -174,4 +194,30 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 		return err
 	}
 	return reactor.New(src, handle, reactor.CancelWithin(r.shutdown)), nil
+}
+
+// share holds the runtime's gate shared for the delivery whose handler
+// context is ctx, waiting until ctx ends or its reactor begins to drain;
+// without a gate it holds nothing and returns at once. ended reports a
+// wait that ctx or the drain ended, which holds nothing.
+func (r *Runtime) share(ctx context.Context) (release func(), ended bool, err error) {
+	if r.gate == nil {
+		return func() {}, false, nil
+	}
+	wait, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if drain := reactor.Draining(ctx); drain != nil {
+		go func() {
+			select {
+			case <-drain:
+				cancel()
+			case <-wait.Done():
+			}
+		}()
+	}
+	release, err = r.gate.Shared(wait)
+	if err != nil {
+		return nil, wait.Err() != nil && errors.Is(err, wait.Err()), fmt.Errorf("messaging: gate: %w", err)
+	}
+	return release, false, nil
 }
