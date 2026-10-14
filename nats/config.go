@@ -30,8 +30,10 @@ type Config struct {
 	Name string `json:"name"`
 	// Stream is the stream's name: a token, as a subscription's Name is.
 	Stream string `json:"stream"`
-	// Prefix is the subject prefix, one or more tokens; the stream captures
-	// Prefix.> and an event is published to Prefix.<type>.
+	// Prefix is the namespace of the broker's event types, one or more
+	// tokens. An event is published with its type as the subject, so every
+	// type the broker publishes or subscribes to starts with Prefix and a
+	// further token, and the stream captures Prefix.>.
 	Prefix string `json:"prefix"`
 	// Owner makes the broker the stream's owner. It is a tri-state pointer,
 	// so an overlay can set it to false: nil, as false, is not the owner.

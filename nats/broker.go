@@ -57,7 +57,8 @@ func New(cfg Config) (*Broker, error) {
 // Prefix.>, the deduplication window, and MaxAge. A non-owner writes
 // nothing: it binds the stream as it finds it, and fails when the stream is
 // missing, wrapping [jetstream.ErrStreamNotFound], or when none of its
-// subjects captures every subject under Prefix.
+// subjects captures every subject under Prefix, the namespace of every type
+// the broker publishes.
 //
 // A failed Start closes what it opened, and the broker can start again. A
 // broker starts once: a Start while another is in progress or has succeeded
@@ -202,17 +203,22 @@ func (b *Broker) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Publish publishes e in binary content mode to Prefix.<type>, with its
-// source and id as Nats-Msg-Id, and returns once the stream holds it. A
-// repeat of a source and id within the stream's deduplication window is
-// accepted and dropped. It rejects what [messaging.Encode] rejects, and a
-// header value holding CR or LF, which the NATS protocol cannot carry,
-// whether or not the broker is started; otherwise it fails with
+// Publish publishes e in binary content mode with its type as the subject,
+// unchanged, and its source and id as Nats-Msg-Id, and returns once the
+// stream holds it. A repeat of a source and id within the stream's
+// deduplication window is accepted and dropped. Whether or not the broker
+// is started, it rejects what [messaging.Encode] rejects, a header value
+// holding CR or LF, which the NATS protocol cannot carry, and a type outside
+// Prefix, which the stream does not capture; the last is [event.Permanent],
+// since no retry brings the type under the prefix. Otherwise it fails with
 // [ErrNotStarted] before Start.
 func (b *Broker) Publish(ctx context.Context, e event.Event) error {
 	h, body, err := messaging.Encode(e)
 	if err == nil {
 		err = carriable(h)
+	}
+	if err == nil {
+		err = b.namespaced(e.Type)
 	}
 	if err != nil {
 		return fmt.Errorf("nats: publish: %w", err)
@@ -221,7 +227,7 @@ func (b *Broker) Publish(ctx context.Context, e event.Event) error {
 	if c == nil {
 		return ErrNotStarted
 	}
-	msg := &natsgo.Msg{Subject: b.subject(e.Type), Header: natsgo.Header(h), Data: body}
+	msg := &natsgo.Msg{Subject: e.Type, Header: natsgo.Header(h), Data: body}
 	msg.Header.Set(jetstream.MsgIDHeader, msgID(e))
 	if _, err := c.js.PublishMsg(ctx, msg); err != nil {
 		return fmt.Errorf("nats: publish %s: %w", e.ID, err)
@@ -248,5 +254,13 @@ func carriable(h event.Header) error {
 	return nil
 }
 
-// subject is the subject an event of type typ is published to.
-func (b *Broker) subject(typ string) string { return b.cfg.Prefix + "." + typ }
+// namespaced fails, as [event.Permanent], on a type outside Prefix: one
+// that does not start with Prefix and a further token. The type is the
+// subject, and the stream captures Prefix.>, which matches one or more
+// tokens after the prefix, so the prefix itself is outside it too.
+func (b *Broker) namespaced(typ string) error {
+	if !strings.HasPrefix(typ, b.cfg.Prefix+".") {
+		return event.Permanent(fmt.Errorf("type %q is not under the prefix %q", typ, b.cfg.Prefix))
+	}
+	return nil
+}

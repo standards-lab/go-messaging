@@ -32,6 +32,15 @@
 // stream is missing or does not capture its prefix. Only the owner sets the
 // stream's Duplicates and MaxAge.
 //
+// # Subjects
+//
+// An event's subject is its type, unchanged, so a type names its subject
+// across every service on the stream. Config.Prefix is the namespace of
+// those types: the stream captures Prefix.>, so [Broker.Publish] refuses a
+// type that is not under Prefix as [event.Permanent], and [Broker.Subscribe]
+// refuses a subscription naming one. A broker with the prefix billing
+// publishes billing.invoice.issued, and a consumer subscribes to that type.
+//
 // # Sources
 //
 // A source from [Broker.Subscribe] binds its durable consumer at its first

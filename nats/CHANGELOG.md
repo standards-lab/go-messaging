@@ -7,6 +7,20 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-10-14
+
+### Changed
+
+- **Breaking:** `Publish` sends an event with its type as the subject, unchanged, rather than
+  `Prefix.<type>`, and a subscription's consumer filters on its types as subjects. `Prefix` is now
+  the namespace of the broker's event types: the owner's stream still captures `Prefix.>`, and a
+  non-owner's `Start` still checks that its stream does. `Publish` refuses a type that is not
+  under the prefix, the prefix itself included, as `event.Permanent`, naming the type and the
+  prefix, so a relay quarantines its row; `Subscribe` refuses a subscription naming such a type.
+  An event a v0.1.0 broker published on `Prefix.<type>` reaches a v0.2.0 consumer only when its
+  type is under the prefix, and with its type unchanged.
+- `natstest.Scratch`'s prefix is the test's type namespace: a test's event types are under it.
+
 ## [v0.1.0] - 2026-10-13
 
 ### Added
@@ -42,5 +56,6 @@ changelog covers this sub-module only; the base module keeps its own.
   (`nats:2.15.1-alpine`, JetStream on tmpfs), through `mise run integration:nats`.
 - The module requires `go-messaging` v0.1.0, go-core v0.10.0, and nats.go v1.54.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...HEAD
+[v0.2.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.1.0...nats/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/nats/v0.1.0

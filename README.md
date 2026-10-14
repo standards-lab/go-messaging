@@ -85,6 +85,12 @@ err := ncfg.Finalize("BILLING") // defaults url, reads BILLING_NATS_*, and valid
 broker, err := nats.New(ncfg) // no I/O: Start connects, at the lowest stage
 ```
 
+The broker publishes each event with its type as the subject, unchanged, so `prefix` is the
+namespace of the service's event types: with the prefix `billing`, it publishes
+`billing.invoice.issued`, and a consumer subscribes to that type. `Publish` refuses a type outside
+the prefix as permanent, so the relay quarantines its row, and `Subscribe` refuses a subscription
+naming one.
+
 One service owns a stream: it sets `owner` true, and its `Start` creates the stream or updates it
 to its config, with the subjects `<prefix>.>`, the deduplication window `duplicates`, and the
 retention `max_age`. Every other service on the stream leaves `owner` unset or false: its broker

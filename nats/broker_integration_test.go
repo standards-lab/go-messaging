@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,8 +213,8 @@ func TestNonOwnerBinds(t *testing.T) {
 		t.Errorf("the non-owner's Start changed the stream:\nbefore %+v\nafter  %+v", before, after)
 	}
 
-	publish(t, other, event.Event{ID: "from-non-owner", Source: "/test", Type: "orders.created"})
-	publish(t, own, event.Event{ID: "from-owner", Source: "/test", Type: "orders.created"})
+	publish(t, other, event.Event{ID: "from-non-owner", Source: "/test", Type: prefix + ".orders.created"})
+	publish(t, own, event.Event{ID: "from-owner", Source: "/test", Type: prefix + ".orders.created"})
 	if n := streamInfo(t, js, stream).State.Msgs; n != 2 {
 		t.Errorf("stream holds %d messages, want both brokers' 2", n)
 	}
@@ -255,7 +257,7 @@ func TestNonOwnerBindsCapturingSubject(t *testing.T) {
 			}
 			createStream(t, js, stream, subjects...)
 			b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix + ".a.b"})
-			publish(t, b, event.Event{ID: "1", Source: "/test", Type: "created"})
+			publish(t, b, event.Event{ID: "1", Source: "/test", Type: prefix + ".a.b.created"})
 			if n := streamInfo(t, js, stream).State.Msgs; n != 1 {
 				t.Errorf("stream on %q holds %d messages, want 1", subjects, n)
 			}
@@ -351,22 +353,23 @@ func TestSecondStartFails(t *testing.T) {
 	}
 }
 
-// Publish sends an event in binary content mode to Prefix.<type>, keyed by
-// its length-prefixed source and id, so a repeat within the window is
-// dropped, and a source and id that spell the same concatenation are not.
+// Publish sends an event in binary content mode with its type as the
+// subject, keyed by its length-prefixed source and id, so a repeat within
+// the window is dropped, and a source and id that spell the same
+// concatenation are not.
 func TestPublishDedups(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
 	stream, prefix := natstest.Scratch(t, url)
 	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
 
-	e := event.Event{ID: "b1", Source: "/a", Type: "orders.created", DataContentType: "application/json", Data: []byte(`{"n":1}`)}
+	e := event.Event{ID: "b1", Source: "/a", Type: prefix + ".orders.created", DataContentType: "application/json", Data: []byte(`{"n":1}`)}
 	publish(t, b, e)
 	publish(t, b, e)
 	if n := streamInfo(t, js, stream).State.Msgs; n != 1 {
 		t.Errorf("after a repeat, stream holds %d messages, want 1", n)
 	}
-	publish(t, b, event.Event{ID: "1", Source: "/ab", Type: "orders.created"})
+	publish(t, b, event.Event{ID: "1", Source: "/ab", Type: prefix + ".orders.created"})
 	if n := streamInfo(t, js, stream).State.Msgs; n != 2 {
 		t.Errorf("after a distinct source and id, stream holds %d messages, want 2", n)
 	}
@@ -381,8 +384,8 @@ func TestPublishDedups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get the first message: %v", err)
 	}
-	if want := prefix + ".orders.created"; m.Subject != want {
-		t.Errorf("Subject = %q, want %q", m.Subject, want)
+	if m.Subject != e.Type {
+		t.Errorf("Subject = %q, want the type, %q", m.Subject, e.Type)
 	}
 	if got, want := m.Header.Get(jetstream.MsgIDHeader), "2:/ab1"; got != want {
 		t.Errorf("Nats-Msg-Id = %q, want %q", got, want)
@@ -392,5 +395,44 @@ func TestPublishDedups(t *testing.T) {
 	}
 	if string(m.Data) != `{"n":1}` {
 		t.Errorf("Data = %s, want the event's data", m.Data)
+	}
+}
+
+// A started broker's Publish refuses, as permanent, an event whose type is
+// not under the prefix, naming the type and the prefix, and the stream
+// holds nothing of it; a type under the prefix publishes on the same
+// broker.
+func TestStartedPublishRefusesTypeOutsidePrefix(t *testing.T) {
+	url := natstest.Open(t)
+	js := jetStream(t, url)
+	stream, prefix := natstest.Scratch(t, url)
+	b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+
+	for name, typ := range map[string]string{
+		"another namespace": "orders.created",
+		"the prefix itself": prefix,
+		"a longer token":    prefix + "x.created",
+	} {
+		err := b.Publish(ctx, event.Event{ID: name, Source: "/test", Type: typ})
+		if err == nil {
+			t.Errorf("%s: Publish of type %q succeeded", name, typ)
+			continue
+		}
+		t.Logf("%s: %v", name, err)
+		if !event.IsPermanent(err) {
+			t.Errorf("%s: Publish = %v, want a permanent error", name, err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, strconv.Quote(typ)) || !strings.Contains(msg, strconv.Quote(prefix)) {
+			t.Errorf("%s: Publish = %v, want it to name the type %q and the prefix %q", name, err, typ, prefix)
+		}
+	}
+	if n := streamInfo(t, js, stream).State.Msgs; n != 0 {
+		t.Errorf("stream holds %d messages, want none of the refused events", n)
+	}
+	publish(t, b, event.Event{ID: "under", Source: "/test", Type: prefix + ".created"})
+	if n := streamInfo(t, js, stream).State.Msgs; n != 1 {
+		t.Errorf("stream holds %d messages, want the one under the prefix", n)
 	}
 }

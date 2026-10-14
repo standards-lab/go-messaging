@@ -5,8 +5,10 @@
 //
 //   - [Open], which returns the server MESSAGING_NATS_URL names, and fails
 //     the test when it is unset
-//   - [Scratch], which returns a stream name and subject prefix unique to
-//     the test on any server, and deletes the stream when the test ends
+//   - [Scratch], which returns a stream name and type namespace, the
+//     broker's prefix, unique to the test on any server, and deletes the
+//     stream when the test ends; the test's event types are under the
+//     namespace
 //
 // [Open] serves the provider's own integration suite; [Scratch] also serves
 // a service's harness, which points a service process at a server of its

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +51,7 @@ func TestBrokerBeforeStart(t *testing.T) {
 	if b.Conn() != nil {
 		t.Error("an unstarted broker has a connection")
 	}
-	if err := b.Publish(t.Context(), event.Event{ID: "1", Source: "/test", Type: "t"}); !errors.Is(err, nats.ErrNotStarted) {
+	if err := b.Publish(t.Context(), event.Event{ID: "1", Source: "/test", Type: "test.t"}); !errors.Is(err, nats.ErrNotStarted) {
 		t.Errorf("Publish = %v, want ErrNotStarted", err)
 	}
 	if err := b.Shutdown(t.Context()); err != nil {
@@ -143,16 +145,58 @@ func TestBrokerStartWhileStarting(t *testing.T) {
 func TestPublishRejects(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	for name, e := range map[string]event.Event{
-		"no id":         {Source: "/test", Type: "t"},
-		"wildcard type": {ID: "1", Source: "/test", Type: "t.*"},
-		"CR LF":         {ID: "1", Source: "/test", Type: "t", Extensions: map[string]string{"note": "two\r\nlines"}},
-		"LF":            {ID: "1", Source: "/test", Type: "t", Extensions: map[string]string{"note": "two\nlines"}},
-		"CR":            {ID: "1", Source: "/test", Type: "t", Extensions: map[string]string{"note": "two\rlines"}},
-		"CR in subject": {ID: "1", Source: "/test", Type: "t", Subject: "a\rb"},
+		"no id":         {Source: "/test", Type: "test.t"},
+		"wildcard type": {ID: "1", Source: "/test", Type: "test.t.*"},
+		"CR LF":         {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\r\nlines"}},
+		"LF":            {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\nlines"}},
+		"CR":            {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\rlines"}},
+		"CR in subject": {ID: "1", Source: "/test", Type: "test.t", Subject: "a\rb"},
 	} {
 		err := b.Publish(t.Context(), e)
 		if err == nil || errors.Is(err, nats.ErrNotStarted) {
 			t.Errorf("%s: Publish = %v, want a rejection", name, err)
 		}
+	}
+}
+
+// Publish refuses a type that is not under the prefix as permanent, naming
+// the type and the prefix, before it needs a connection: the prefix itself,
+// and a type whose first token only starts with the prefix, are outside it.
+func TestPublishRefusesTypeOutsidePrefix(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, typ := range []string{"orders.created", "test", "testing.created", "other.test.created"} {
+		err := b.Publish(t.Context(), event.Event{ID: "1", Source: "/test", Type: typ})
+		if err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("%s: Publish = %v, want a refusal", typ, err)
+			continue
+		}
+		if !event.IsPermanent(err) {
+			t.Errorf("%s: Publish = %v, want a permanent error", typ, err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, strconv.Quote(typ)) || !strings.Contains(msg, `"test"`) {
+			t.Errorf("%s: Publish = %v, want it to name the type and the prefix test", typ, err)
+		}
+	}
+	if err := b.Publish(t.Context(), event.Event{ID: "1", Source: "/test", Type: "test.created"}); !errors.Is(err, nats.ErrNotStarted) {
+		t.Errorf("test.created: Publish = %v, want ErrNotStarted: the type is under the prefix", err)
+	}
+}
+
+// Subscribe refuses a subscription naming a type that is not under the
+// prefix, which the stream never captures, naming the type and the prefix.
+func TestSubscribeRefusesTypeOutsidePrefix(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, typ := range []string{"orders.created", "test", "testing.created"} {
+		_, err := b.Subscribe(messaging.Subscription{Name: "orders", Types: []string{"test.created", typ}}, nil)
+		if err == nil {
+			t.Errorf("%s: Subscribe accepted the type", typ)
+			continue
+		}
+		if msg := err.Error(); !strings.Contains(msg, strconv.Quote(typ)) || !strings.Contains(msg, `"test"`) {
+			t.Errorf("%s: Subscribe = %v, want it to name the type and the prefix test", typ, err)
+		}
+	}
+	if _, err := b.Subscribe(messaging.Subscription{Name: "orders", Types: []string{"test.created", "test.paid"}}, nil); err != nil {
+		t.Errorf("Subscribe to types under the prefix: %v", err)
 	}
 }

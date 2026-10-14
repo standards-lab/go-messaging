@@ -26,12 +26,58 @@ import (
 )
 
 // TestConformance runs the base contract's suite on an owner broker, each
-// case on its own scratch stream.
+// case on its own scratch stream. The suite's types name no namespace, so
+// they reach the broker under the scratch prefix, as a service's own types
+// sit under its prefix.
 func TestConformance(t *testing.T) {
 	url := natstest.Open(t)
 	messagingtest.Run(t, func(t *testing.T) messaging.Broker {
 		stream, prefix := natstest.Scratch(t, url)
-		return started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
+		b := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix, Owner: new(true)})
+		return namespaced{Broker: b, prefix: prefix}
+	})
+}
+
+// namespaced is a broker whose callers' types are relative to prefix: it
+// publishes and subscribes to prefix.<type>, and delivers each event with
+// its type relative again. An empty type stays empty, so an event without
+// one is refused for that, as the suite expects.
+type namespaced struct {
+	*nats.Broker
+	prefix string
+}
+
+func (n namespaced) Publish(ctx context.Context, e event.Event) error {
+	if e.Type != "" {
+		e.Type = n.prefix + "." + e.Type
+	}
+	return n.Broker.Publish(ctx, e)
+}
+
+func (n namespaced) Subscribe(sub messaging.Subscription, report messaging.Report) (reactor.Source[event.Event], error) {
+	types := make([]string, len(sub.Types))
+	for i, typ := range sub.Types {
+		types[i] = n.prefix + "." + typ
+	}
+	sub.Types = types
+	src, err := n.Broker.Subscribe(sub, report)
+	if err != nil {
+		return nil, err
+	}
+	return relative{Source: src, prefix: n.prefix}, nil
+}
+
+// relative is a source that delivers each event with its type relative to
+// prefix.
+type relative struct {
+	reactor.Source[event.Event]
+	prefix string
+}
+
+func (r relative) Receive(ctx context.Context, fn reactor.Func[event.Event]) error {
+	return r.Source.Receive(ctx, func(ctx context.Context, e event.Event) error {
+		e.Type = strings.TrimPrefix(e.Type, r.prefix+".")
+		return fn(ctx, e)
 	})
 }
 
@@ -136,7 +182,7 @@ func consumerInfo(t *testing.T, js jetstream.JetStream, stream, name string) *je
 // normalized subscription.
 func TestSourceBindsConsumer(t *testing.T) {
 	b, url, stream, prefix := ownerBroker(t)
-	sub := messaging.Subscription{Name: "derived", Types: []string{"b", "a", "a"}, MaxDeliver: 4, AckWait: 2 * time.Second, Start: messaging.StartNew}
+	sub := messaging.Subscription{Name: "derived", Types: []string{prefix + ".b", prefix + ".a", prefix + ".a"}, MaxDeliver: 4, AckWait: 2 * time.Second, Start: messaging.StartNew}
 	member(t, b, sub, nil, func(context.Context, event.Event) error { return nil })
 	member(t, b, messaging.Subscription{Name: "defaults"}, nil, func(context.Context, event.Event) error { return nil })
 	js := jetStream(t, url)
@@ -197,7 +243,7 @@ func TestSourceDifferentConfigFails(t *testing.T) {
 // acknowledgement been sent, the server would have taken it and never
 // redelivered the event.
 func TestSourceDropsLateOutcome(t *testing.T) {
-	b, _, _, _ := ownerBroker(t)
+	b, _, _, prefix := ownerBroker(t)
 	var mu sync.Mutex
 	var attempts []int
 	member(t, b, messaging.Subscription{Name: "late", AckWait: 200 * time.Millisecond}, nil, func(ctx context.Context, _ event.Event) error {
@@ -211,7 +257,7 @@ func TestSourceDropsLateOutcome(t *testing.T) {
 		}
 		return nil
 	})
-	publish(t, b, event.Event{ID: "l", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "l", Source: "/test", Type: prefix + ".t"})
 	eventually(t, "the redelivery of the late event", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
@@ -244,7 +290,7 @@ func TestSourceReportsUndecodable(t *testing.T) {
 	if _, err := js.Publish(ctx, prefix+".t", []byte("not an event")); err != nil {
 		t.Fatalf("publish raw bytes: %v", err)
 	}
-	publish(t, b, event.Event{ID: "after", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "after", Source: "/test", Type: prefix + ".t"})
 	eventually(t, "the event after the undecodable one", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
@@ -270,7 +316,7 @@ func TestSourceReportsUndecodable(t *testing.T) {
 // pull is waiting to hear of it, reports the acknowledgement that fails to
 // send, then ends Receive once its next pulls fail.
 func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
-	b, url, stream, _ := ownerBroker(t)
+	b, url, stream, prefix := ownerBroker(t)
 	var r reports
 	src, err := b.Subscribe(messaging.Subscription{Name: "doomed"}, r.report)
 	if err != nil {
@@ -283,7 +329,7 @@ func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
 		return nil
 	})
 	eventually(t, "the source to be ready", src.Ready)
-	publish(t, b, event.Event{ID: "d", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "d", Source: "/test", Type: prefix + ".t"})
 	select {
 	case <-handling:
 	case <-time.After(failsafe):
@@ -329,7 +375,7 @@ func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 		"while handling": {hold: true, want: []error{jetstream.ErrStreamNotFound}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			b, url, stream, _ := ownerBroker(t)
+			b, url, stream, prefix := ownerBroker(t)
 			src, err := b.Subscribe(messaging.Subscription{Name: "orphan"}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -342,7 +388,7 @@ func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 			})
 			eventually(t, "the source to be ready", src.Ready)
 			if tc.hold {
-				publish(t, b, event.Event{ID: "o", Source: "/test", Type: "t"})
+				publish(t, b, event.Event{ID: "o", Source: "/test", Type: prefix + ".t"})
 				select {
 				case <-handling:
 				case <-time.After(failsafe):
@@ -370,7 +416,7 @@ func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 // back promptly, long before the consumer's AckWait would return it
 // unsettled.
 func TestSourceNaksAtOnceWithoutRetryDelay(t *testing.T) {
-	b, _, _, _ := ownerBroker(t)
+	b, _, _, prefix := ownerBroker(t)
 	sub := messaging.Subscription{Name: "prompt", AckWait: 5 * time.Second}
 	type delivery struct {
 		attempt int
@@ -388,7 +434,7 @@ func TestSourceNaksAtOnceWithoutRetryDelay(t *testing.T) {
 		}
 		return nil
 	})
-	publish(t, b, event.Event{ID: "n", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "n", Source: "/test", Type: prefix + ".t"})
 	var ds []delivery
 	for len(ds) < 2 {
 		select {
@@ -412,7 +458,7 @@ func TestSourceNaksAtOnceWithoutRetryDelay(t *testing.T) {
 // next waits on the server, unpulled, and is delivered once the first
 // settles.
 func TestSourceOneMessageAtATime(t *testing.T) {
-	b, url, stream, _ := ownerBroker(t)
+	b, url, stream, prefix := ownerBroker(t)
 	handling := make(chan string, 2)
 	release := make(chan struct{})
 	member(t, b, messaging.Subscription{Name: "serial"}, nil, func(ctx context.Context, e event.Event) error {
@@ -426,8 +472,8 @@ func TestSourceOneMessageAtATime(t *testing.T) {
 	// Registered after the member's, so it runs first and frees a held
 	// handler before the member shuts down.
 	t.Cleanup(func() { close(release) })
-	publish(t, b, event.Event{ID: "one", Source: "/test", Type: "t"})
-	publish(t, b, event.Event{ID: "two", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "one", Source: "/test", Type: prefix + ".t"})
+	publish(t, b, event.Event{ID: "two", Source: "/test", Type: prefix + ".t"})
 	next := func(what string) string {
 		t.Helper()
 		select {
@@ -469,7 +515,7 @@ func TestSourceNilReportDiscards(t *testing.T) {
 	if _, err := jetStream(t, url).Publish(ctx, prefix+".t", []byte("not an event")); err != nil {
 		t.Fatalf("publish raw bytes: %v", err)
 	}
-	publish(t, b, event.Event{ID: "after", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "after", Source: "/test", Type: prefix + ".t"})
 	select {
 	case id := <-got:
 		if id != "after" {
@@ -499,6 +545,37 @@ func TestSourceClosedConnectionEndsReceive(t *testing.T) {
 	}
 }
 
+// A subscription filters on its types as subjects: its member receives
+// the events of those types, each with its type, and none of another type,
+// even one that extends a filtered type.
+func TestSourceFiltersOnTypes(t *testing.T) {
+	b, _, _, prefix := ownerBroker(t)
+	want, also := prefix+".orders.created", prefix+".orders.paid"
+	got := make(chan event.Event, 10)
+	member(t, b, messaging.Subscription{Name: "typed", Types: []string{want, also}}, nil, func(_ context.Context, e event.Event) error {
+		got <- e
+		return nil
+	})
+	publish(t, b, event.Event{ID: "skip", Source: "/test", Type: prefix + ".orders.cancelled"})
+	publish(t, b, event.Event{ID: "a", Source: "/test", Type: want})
+	publish(t, b, event.Event{ID: "longer", Source: "/test", Type: want + ".late"})
+	publish(t, b, event.Event{ID: "b", Source: "/test", Type: also})
+	publish(t, b, event.Event{ID: "end", Source: "/test", Type: want})
+
+	var received []string
+	for len(received) < 3 {
+		select {
+		case e := <-got:
+			received = append(received, e.ID+" "+e.Type)
+		case <-time.After(failsafe):
+			t.Fatalf("received %q, then nothing", received)
+		}
+	}
+	if w := []string{"a " + want, "b " + also, "end " + want}; !slices.Equal(received, w) {
+		t.Errorf("received %q, want %q", received, w)
+	}
+}
+
 // A non-owner's member receives the events the owner publishes.
 func TestSourceNonOwnerReceives(t *testing.T) {
 	own, url, stream, prefix := ownerBroker(t)
@@ -508,7 +585,7 @@ func TestSourceNonOwnerReceives(t *testing.T) {
 		got <- e.ID
 		return nil
 	})
-	publish(t, own, event.Event{ID: "shared", Source: "/test", Type: "t"})
+	publish(t, own, event.Event{ID: "shared", Source: "/test", Type: prefix + ".t"})
 	select {
 	case id := <-got:
 		if id != "shared" {
@@ -612,7 +689,7 @@ func TestSourceReportsOutage(t *testing.T) {
 	if !src.Ready() {
 		t.Error("the source is not ready after the server came back")
 	}
-	publish(t, b, event.Event{ID: "back", Source: "/test", Type: "t"})
+	publish(t, b, event.Event{ID: "back", Source: "/test", Type: prefix + ".t"})
 	select {
 	case id := <-got:
 		if id != "back" {
