@@ -1,0 +1,10 @@
+services:
+  nats:
+    build:
+      context: nats
+    ports:
+      # 4225 by default so the harness keeps off the 4222 another NATS
+      # server takes. The monitoring port stays unpublished: only the health
+      # check, inside the container, reads it.
+      - "127.0.0.1:${NATS_PORT:-4225}:4222"
+    tmpfs: /data

@@ -16,6 +16,10 @@ GO_MODULES = ". postgres nats"
 # follows POSTGRES_PORT as compose/postgres.yml's does. Each test creates
 # and drops its own database on it.
 MESSAGING_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5435') }}/app?sslmode=disable"
+# The nats integration suite's server: compose.yml's NATS, whose port
+# follows NATS_PORT as compose/nats.yml's does. Each test creates and
+# deletes its own stream on it.
+MESSAGING_NATS_URL = "nats://127.0.0.1:{{ get_env(name='NATS_PORT', default='4225') }}"
 
 # The one check: read-only and deterministic, stopping at the first failure.
 # Each module builds with the workspace off, proving it resolves its own
@@ -132,24 +136,46 @@ for mod in $GO_MODULES; do
 done
 '''
 
-# The integration tier runs the postgres module's suite against compose.yml's
-# PostgreSQL, the server MESSAGING_DSN names. The harness keeps its data in
-# tmpfs, so every start is empty; integration starts it, runs the suite, and
-# stops it whether the suite passes or fails, printing its log on failure.
-[tasks.integration]
+# The integration tier runs each module's suite against its compose service:
+# the postgres module's against the PostgreSQL MESSAGING_DSN names, the nats
+# module's against the NATS MESSAGING_NATS_URL names. Each service keeps its
+# data in tmpfs, so every start is empty. Each task starts only its own
+# service, runs the suite, and stops the service whether the suite passes or
+# fails, printing its log on failure.
+[tasks."integration:postgres"]
 description = "Run the postgres module's integration suite against a fresh compose PostgreSQL"
 env = { GOWORK = "off" }
 run = '''
 set -e
-trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs postgres; docker compose down; exit $rc' EXIT
-docker compose up -d --wait --build
+trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs postgres; docker compose down postgres; exit $rc' EXIT
+docker compose up -d --wait --build postgres
 (cd postgres && go test -race -tags integration -count=1 -v ./...)
 '''
 
+[tasks."integration:nats"]
+description = "Run the nats module's integration suite against a fresh compose NATS"
+env = { GOWORK = "off" }
+run = '''
+set -e
+trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs nats; docker compose down nats; exit $rc' EXIT
+docker compose up -d --wait --build nats
+(cd nats && go test -race -tags integration -count=1 -v ./...)
+'''
+
+# One module at a time, every module even after one fails.
+[tasks.integration]
+description = "Run every module's integration suite, each against a fresh compose service"
+run = '''
+rc=0
+mise run integration:postgres || rc=1
+mise run integration:nats || rc=1
+exit $rc
+'''
+
 [tasks.up]
-description = "Start the compose PostgreSQL and wait until it is healthy"
+description = "Start every compose service and wait until each is healthy"
 run = "docker compose up -d --wait --build"
 
 [tasks.down]
-description = "Stop the compose PostgreSQL, discarding its data"
+description = "Stop every compose service, discarding its data"
 run = "docker compose down"

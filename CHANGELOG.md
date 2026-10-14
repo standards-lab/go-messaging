@@ -7,6 +7,12 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation only: the package documentation names the `nats` sub-module as the NATS
+  JetStream provider rather than a reserved one, and `OnFailure`'s names the failure volume the
+  nats provider's sources report during an outage.
+
 ## [v0.1.0] - 2026-10-13
 
 ### Added

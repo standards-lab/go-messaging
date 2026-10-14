@@ -4,7 +4,7 @@ go-messaging is the messaging infrastructure library of Go Elemental, the Standa
 organization's Go implementation of the Elemental Architecture. It gives a service one
 broker-agnostic contract to emit events and run reactors on: events are go-core's CloudEvents
 `event` type, emitted through a transactional outbox and consumed idempotently through an inbox,
-and consumers are go-core `reactor`s on a subscription source. NATS JetStream is the declared
+and consumers are go-core `reactor`s on a subscription source. NATS JetStream is the production
 provider, and a memory provider serves tests. The base module depends on the standard library,
 go-core, and sqlate with its `query` package, the adjacent library the outbox's and inbox's
 engine contract builds on; the postgres engine and the NATS provider are sub-modules.
@@ -30,6 +30,6 @@ written detail when a session is about to build it.
 - **Memory provider** and the conformance suite: `memory/doc.go`, `messagingtest/doc.go`.
 - **Postgres engine** and its `messaging` migration set: `postgres/doc.go`, with the
   scratch-database helper in `postgres/pgtest/doc.go`.
-- **NATS provider**: not built; `nats` is a scaffold until the nats task binds a JetStream
-  stream without provisioning it.
+- **NATS provider**, with stream ownership: `nats/doc.go`, with the scratch-stream helper in
+  `nats/natstest/doc.go`.
 - **CI and release**: `.github/workflows/`; the README's "Releases" section.

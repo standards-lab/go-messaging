@@ -61,8 +61,8 @@
 // [Broker], and the messagingtest package holds the conformance suite every
 // provider passes. The outbox and inbox packages run their tables on any
 // engine that supplies the statements; the postgres sub-module is that
-// engine for PostgreSQL. The nats sub-module is reserved for the NATS
-// JetStream provider.
+// engine for PostgreSQL, and the nats sub-module is the NATS JetStream
+// provider.
 //
 // The base module depends on the standard library, go-core, and sqlate and
 // its query package, the adjacent library the outbox's and inbox's engine

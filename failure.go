@@ -72,9 +72,11 @@ type Option func(*Runtime)
 // OnFailure sets the hook the runtime reports each [Failure] to. Without
 // it, or with a nil hook, the runtime logs each failure at warn on its
 // logger. The default logs every failure it is given, so during an outage
-// it logs each failed relay pass, about four a second at the default poll;
-// a service that wants failures throttled, counted, or alerted on sets a
-// hook that does so.
+// it logs each failed relay pass, about four a second at the default poll,
+// and each failed pull of the nats provider's sources, one per consumer
+// member about every 1.1 seconds, a pull's one-second bound plus its 100ms
+// wait before the next; a service that wants failures throttled, counted,
+// or alerted on sets a hook that does so.
 func OnFailure(h Hook) Option {
 	return func(r *Runtime) {
 		if h != nil {
