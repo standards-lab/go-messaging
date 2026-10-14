@@ -299,6 +299,36 @@ func TestGatedConsumerDrainLeavesTheEventForRedelivery(t *testing.T) {
 	awaitAttempts(t, again, 2)
 }
 
+// A gate that fails other than by its wait ending is the delivery's
+// outcome, as a transient error of the handler's would be: the handler is
+// never called, each delivery is logged as retried, and the last is
+// reported as exhausted with the gate's error.
+func TestGatedConsumerGateFailureExhausts(t *testing.T) {
+	broken := errors.New("gate broken")
+	b := memory.New()
+	var f failures
+	var log syncBuffer
+	sub := messaging.Subscription{Name: "consumer", MaxDeliver: 2, RetryDelay: time.Millisecond}
+	r, attempts := gatedConsumer(t, b, &f, &log, sub, messaging.Gated(failingGate{broken}))
+	start(t, r)
+	if err := b.Publish(t.Context(), event1); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the exhaustion", func() bool { return len(f.all()) > 0 })
+	select {
+	case a := <-attempts:
+		t.Fatalf("handler called on attempt %d although the gate failed", a)
+	default:
+	}
+	got := f.all()
+	if len(got) != 1 || got[0].Kind != messaging.FailureExhausted || got[0].Attempt != 2 || !errors.Is(got[0].Err, broken) {
+		t.Errorf("hook got %+v, want one exhaustion on attempt 2 with the gate's error", got)
+	}
+	if n := strings.Count(log.String(), "outcome=retried"); n != 2 {
+		t.Errorf("logged %d retried deliveries, want 2:\n%s", n, log.String())
+	}
+}
+
 // Without Gated, or with a nil gate, neither the relay nor a consumer
 // holds any gate, so a held one stops neither.
 func TestUngatedRuntimeHoldsNoGate(t *testing.T) {
