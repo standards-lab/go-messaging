@@ -14,8 +14,7 @@ import (
 // changed row is a breaking change to the schema's version line. The texts
 // are the files' bodies without their "--|" header, which Transactional
 // carries. 0001 is released in v0.1.0; 0002 and 0003, the retentions'
-// indexes, built CONCURRENTLY outside a transaction, are unreleased until
-// the module's next release, from which their pins hold.
+// indexes, built CONCURRENTLY outside a transaction, in v0.2.0.
 var released = map[int]struct {
 	name, up, down string
 	transactional  bool
