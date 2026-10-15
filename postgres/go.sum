@@ -15,8 +15,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/standards-lab/go-core v0.10.0 h1:Sb5xuyl/j+7bRwFXegXkEa8CnDUQ4Kz7/vWDogjDptg=
 github.com/standards-lab/go-core v0.10.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
-github.com/standards-lab/go-messaging v0.1.0 h1:MtfkdhSVmubeUQScyI6S64sYeHqT//zsIzcIePZIbv8=
-github.com/standards-lab/go-messaging v0.1.0/go.mod h1:7J7SVd58d7jw1lq/XMgrTfz8e+NWHaS/uQ88A0uzg38=
+github.com/standards-lab/go-messaging v0.2.0 h1:P7y0S9haIU/pETn7Wos8YZvFwbmEbFWd13AWcuxfZFQ=
+github.com/standards-lab/go-messaging v0.2.0/go.mod h1:7J7SVd58d7jw1lq/XMgrTfz8e+NWHaS/uQ88A0uzg38=
 github.com/standards-lab/sqlate v0.5.0 h1:2QEbhIzy2mtMxY2XMfqqqzOlCZs2I3vZNN7fB9daBjw=
 github.com/standards-lab/sqlate v0.5.0/go.mod h1:pikNmGf/z3x46SBWFXgt/xKIDZuquSgCoXy5OWBFFR4=
 github.com/standards-lab/sqlate/postgres v0.5.0 h1:7hGo679suOoXctbSIywVE5HwHKtTmvmtedclKbcq8kE=

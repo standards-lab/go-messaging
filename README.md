@@ -31,8 +31,9 @@ its provider's.
 - `memory` is the in-memory provider, for a service's tests and the conformance double.
 - `messagingtest` is the conformance suite, `Run`, every provider passes.
 - `postgres` (sub-module) is the PostgreSQL engine: the outbox's and inbox's statements, the
-  `messaging` migration set, `Verify`, and `Pending`. Its `pgtest` package gives each test a
-  throwaway database.
+  `messaging` migration set, `Verify`, `Pending`, and the retentions, `OutboxRetention` and
+  `InboxRetention`, that delete aged published and handled rows a budget at a time. Its `pgtest`
+  package gives each test a throwaway database.
 - `nats` (sub-module) is the NATS JetStream provider: the `Broker` on one stream, its `Config`
   block with the stream's owner switch, and the durable pull consumers its sources bind. Its
   `natstest` package gives each test its own stream.
@@ -177,7 +178,8 @@ An outbox row that can never be published, one whose event does not decode or wh
 failed with an `event.Permanent` error, is quarantined in its own transaction, so it does not
 hold the outbox back. The relay reports it as a `quarantine` failure carrying an
 `*outbox.QuarantineError`. The row stays in `messaging_outbox` with `quarantined_at` and
-`quarantine_reason` set; the relay never claims it again and `postgres.Pending` does not count it.
+`quarantine_reason` set; the relay never claims it again, `postgres.Pending` does not count it,
+and the outbox's retention never deletes it.
 
 To inspect the quarantined rows:
 
@@ -196,6 +198,26 @@ UPDATE messaging_outbox
 SET quarantined_at = NULL, quarantine_reason = NULL
 WHERE seq = $1;
 ```
+
+### Retention
+
+The relay never deletes a published row and the inbox never deletes a handled one, so both
+tables grow until the service reclaims them. `postgres.OutboxRetention` and
+`postgres.InboxRetention` each return a `*postgres.Retention` whose `Pass(ctx, budget)` deletes
+at most `budget` rows older than its age, oldest first, and reports `more` when it deleted its
+whole budget. The service supplies both ages; the module has no default:
+
+```go
+outboxes, err := postgres.OutboxRetention(db, 7*24*time.Hour) // published rows only
+inboxes, err := postgres.InboxRetention(db, 7*24*time.Hour)   // must outlast every redelivery
+
+more, err := outboxes.Pass(ctx, 500)
+```
+
+An inbox row's deletion lets a redelivery of its event be claimed again, so the inbox's age must
+outlast every redelivery the broker can make. A pass runs on a pool and needs no transaction,
+and `Pass` has the shape a sweeper's reclaimer takes, so a sweeper that bounds each pass by a
+budget drives it. Migrations 0002 and 0003 index both tables for their retentions.
 
 ### MaxDeliver exhaustion
 

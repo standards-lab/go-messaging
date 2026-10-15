@@ -122,6 +122,23 @@ func indexdef(t *testing.T, db *sqlate.DB, name string) string {
 	return def
 }
 
+// valid reports whether the index named name is valid: a concurrent build
+// that failed leaves an invalid index behind.
+func valid(t *testing.T, db *sqlate.DB, name string) bool {
+	t.Helper()
+	r, err := db.QueryContext(t.Context(), `SELECT indisvalid FROM pg_index WHERE indexrelid = $1::regclass`, name)
+	if err != nil {
+		t.Fatalf("read index %s: %v", name, err)
+	}
+	defer func() { _ = r.Close() }()
+	var ok bool
+	r.Next()
+	if err := r.Scan(&ok); err != nil {
+		t.Fatalf("scan index %s: %v", name, err)
+	}
+	return ok
+}
+
 func TestMigrationsUpAndDown(t *testing.T) {
 	db := pgtest.Open(t)
 	m := migrator(t, db)
@@ -137,6 +154,35 @@ func TestMigrationsUpAndDown(t *testing.T) {
 	// leaves it as a published one does.
 	if def := indexdef(t, db, "messaging_ix_outbox_unpublished"); !strings.Contains(def, "WHERE ((published_at IS NULL) AND (quarantined_at IS NULL))") {
 		t.Errorf("the unpublished index is %s, want it to leave published and quarantined rows out", def)
+	}
+	// The retentions' indexes hold what each deletes, in the order it
+	// deletes: published rows neither quarantined by publication time, and
+	// handled rows by handling time.
+	retained := map[string]string{
+		"messaging_ix_outbox_published": "(published_at) WHERE ((published_at IS NOT NULL) AND (quarantined_at IS NULL))",
+		"messaging_ix_inbox_handled":    "messaging_inbox USING btree (handled_at)",
+	}
+	for name, want := range retained {
+		if def := indexdef(t, db, name); !strings.HasSuffix(def, want) {
+			t.Errorf("index %s is %s, want it to end %s", name, def, want)
+		}
+		if !valid(t, db, name) {
+			t.Errorf("index %s is not valid after its concurrent build", name)
+		}
+	}
+	// The index migrations revert on their own, leaving the tables.
+	if err := m.Down(t.Context(), 2); err != nil {
+		t.Fatalf("down the indexes: %v", err)
+	}
+	for name := range retained {
+		if exists(t, db, name) {
+			t.Errorf("after down, index %s remains", name)
+		}
+	}
+	for _, table := range []string{"messaging_outbox", "messaging_inbox"} {
+		if !exists(t, db, table) {
+			t.Errorf("after the indexes' down, %s is missing", table)
+		}
 	}
 	if err := m.Down(t.Context(), 1); err != nil {
 		t.Fatalf("down: %v", err)

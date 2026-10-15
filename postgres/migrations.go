@@ -21,8 +21,8 @@ const (
 var migrationFiles embed.FS
 
 // Migrations returns the messaging migration set for Postgres: the outbox's
-// and the inbox's tables. A consumer declares it ahead of its own set in its
-// migrator.
+// and the inbox's tables, and the indexes their retentions read. A consumer
+// declares it ahead of its own set in its migrator.
 func Migrations() (migrate.Set, error) {
 	files, err := migrate.Files(migrationFiles, "migrations")
 	if err != nil {

@@ -24,14 +24,14 @@ func TestMigrationsName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if set.Name != postgres.Source || set.Table != postgres.Table || len(set.Migrations) != 1 {
+	if set.Name != postgres.Source || set.Table != postgres.Table || len(set.Migrations) != 3 {
 		t.Fatalf("set = %s/%s with %d migrations", set.Name, set.Table, len(set.Migrations))
 	}
 }
 
 // Every statement that writes declares its transaction: the relay's claim,
 // mark, and quarantine run on its own, and the sink's and the inbox's on the
-// command's. Only the count runs on a pool.
+// command's. The count and the retentions' deletes run on a pool.
 func TestStatementsDeclareTheirTransaction(t *testing.T) {
 	want := map[string]bool{
 		"claim_inbox":    true,
@@ -40,6 +40,8 @@ func TestStatementsDeclareTheirTransaction(t *testing.T) {
 		"emit":           true,
 		"mark_published": true,
 		"quarantine_row": true,
+		"reclaim_inbox":  false,
+		"reclaim_outbox": false,
 	}
 	got := map[string]bool{}
 	for _, st := range postgres.Statements() {
