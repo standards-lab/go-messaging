@@ -13,13 +13,16 @@ import (
 // released migration never changes: a new migration adds a row here, and a
 // changed row is a breaking change to the schema's version line. The texts
 // are the files' bodies without their "--|" header, which Transactional
-// carries. 0001 is unreleased until the module's first release, v0.1.0,
-// from which its pin holds.
+// carries. 0001 is released in v0.1.0; 0002 and 0003, the retentions'
+// indexes, built CONCURRENTLY outside a transaction, are unreleased until
+// the module's next release, from which their pins hold.
 var released = map[int]struct {
 	name, up, down string
 	transactional  bool
 }{
 	1: {"messaging", "486c6abe9b02a2de4ab3ad0550dd8330785d9c20c5853c07c8d779f397309169", "e2474958b549a4c3e5265e64770fc4b7229cccf0cee478cc3eb2283f25b831a9", true},
+	2: {"outbox_published", "4b0e354178242023f986bba494261fe4904bf8958cce14f4dc8319503f859788", "60226563c9568317ce82bd22787079838eee03c87146a3b2db1ca00849952e96", false},
+	3: {"inbox_handled", "6d2d5113c6108e06275876ed1eaabd3eccbc8d74a0b99ad6dd71406460769dbc", "355af6d52dd1a31e367ca64ea6cc6a6141132b5e8ef36fd3ffe69654930ca69f", false},
 }
 
 // sum is the hex sha256 of text.

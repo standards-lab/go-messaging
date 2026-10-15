@@ -7,6 +7,21 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- `OutboxRetention` and `InboxRetention`, which return a `*Retention` whose `Pass(ctx, budget)`
+  deletes at most `budget` rows older than the retention's age, oldest first, and reports `more`
+  exactly when it deleted its whole budget. The outbox's deletes published rows by
+  `published_at` and never a row awaiting publication or a quarantined one; the inbox's deletes
+  rows by `handled_at`. Both constructors refuse an age that is not positive, a pass refuses a
+  budget below 1, and the module exports no default age. Neither is part of an `Engine`.
+- Migrations 0002 and 0003 in the `messaging` set: `messaging_ix_outbox_published`, the published
+  outbox rows by `published_at`, and `messaging_ix_inbox_handled`, the inbox rows by
+  `handled_at`, each built and dropped `CONCURRENTLY` in a non-transactional migration
+  (`--| transaction: none`) of one statement. The golden-hash test pins both.
+- `Verify` prepares, and `Statements` lists, the retentions' statements, `reclaim_outbox` and
+  `reclaim_inbox`.
+
 ### Changed
 
 - The module requires `go-messaging` v0.2.0, which adds the `Gated` option and `outbox.Gate`;
