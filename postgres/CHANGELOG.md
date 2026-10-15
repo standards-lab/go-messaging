@@ -7,6 +7,11 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- The module requires `go-messaging` v0.2.0, which adds the `Gated` option and `outbox.Gate`;
+  nothing in this module changes with it.
+
 ## [v0.1.0] - 2026-10-13
 
 ### Added
