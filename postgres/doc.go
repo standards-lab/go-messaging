@@ -20,20 +20,19 @@
 // module ships them: 0001 creates both tables, 0002 indexes the published
 // outbox rows by published_at, and 0003 the inbox rows by handled_at, for
 // the retentions. Every object it creates is prefixed messaging_, and a
-// consumer declares the set ahead of its own.
+// consumer declares the set ahead of its own. An outbox row the relay
+// quarantines stays in messaging_outbox with the time and reason of its
+// quarantine, quarantined_at and quarantine_reason, and is neither claimed
+// again, counted by [Pending], nor deleted by a retention. A released
+// migration never changes; a golden-hash test pins each one.
 //
 // 0002 and 0003 build their indexes CONCURRENTLY, so a table already in
 // service keeps taking writes while its index builds. PostgreSQL refuses
-// CONCURRENTLY inside a transaction block, so each is headed
-// "--| transaction: none" and holds that one statement, as is its down,
-// which drops the index CONCURRENTLY. A build that fails leaves the set
-// dirty at its version and may leave an invalid index behind: the repair
-// is to drop the index, Force the set to the version before, and run Up
-// again. An outbox
-// row the relay quarantines stays in messaging_outbox with the time and
-// reason of its quarantine, quarantined_at and quarantine_reason, and is
-// neither claimed again nor counted by [Pending]. A released migration
-// never changes; a golden-hash test pins each one.
+// CONCURRENTLY inside a transaction block, so each migration, up and down,
+// is headed "--| transaction: none" and holds its one statement; each down
+// drops its index CONCURRENTLY. A build that fails leaves the set dirty at
+// its version and may leave an invalid index behind: the repair is to drop
+// the index, Force the set to the version before, and run Up again.
 //
 // # Statements
 //
