@@ -27,8 +27,8 @@
 //     failed: [FailureRelay], [FailureQuarantine], [FailureSource], or
 //     [FailureExhausted]
 //   - [Hook], which receives each Failure, and [Gate], which the runtime's
-//     reactors hold shared: the optional fields [Setup.OnFailure] and
-//     [Setup.Gate]
+//     reactors hold shared: the types of the optional fields
+//     [Setup.OnFailure] and [Setup.Gate]
 //
 // # Brokers and subscriptions
 //
@@ -48,7 +48,7 @@
 // through. Its [Runtime.Relay] publishes the outbox, and its
 // [Runtime.Consume] builds a consuming reactor that decodes each event into
 // the consumer's own type and binds its inbox claim. The failures both
-// survive reach the hook [Setup.OnFailure] names, each as a [Failure], and
+// survive reach the hook set as [Setup.OnFailure], each as a [Failure], and
 // are logged at warn without one. Under a [Setup.Gate], the relay holds a
 // quiesce gate for each outbox row and a consumer for each delivery, so an
 // operation that holds the gate exclusively runs with both paused.

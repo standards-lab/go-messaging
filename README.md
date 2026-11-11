@@ -22,9 +22,9 @@ its provider's.
 ## Packages
 
 - `messaging` (the root) is the broker contract and the runtime: `Broker` and `Publisher`,
-  `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`,
-  `Setup`, whose `Build` builds the `Runtime` with its `Relay` and `Consume` reactors, the error
-  hook's `Failure` and `Hook`, and the quiesce gate's `Gate`.
+  `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`, the
+  `Runtime` with its `Relay` and `Consume` reactors, the `Setup` whose `Build` builds it, the
+  error hook's `Failure` and `Hook`, and the quiesce gate's `Gate`.
 - `outbox` writes a command's events in the command's own transaction and relays them to the
   broker, quarantining a row that can never be published. `Outbox.Relay` takes its report,
   per-row timeout, last-pass drain, and gate as one `outbox.RelayOptions` value.

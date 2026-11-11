@@ -18,7 +18,7 @@ v0.7.0, which make the same change to their own constructors and transactions.
 
 - `Setup`, what a service's `Runtime` is built from: `Config`, `Broker`, `Outbox`, `Inbox`,
   `Shutdown`, and `Logger`, all required, and `OnFailure` and `Gate`, optional. `Setup.Build`
-  builds the `Runtime` `New` built. It panics, before any other check, with
+  builds the `Runtime` that `New` built. It panics, before any other check, with
   `messaging: Setup.Broker is nil` or `messaging: Setup.Logger is nil`, and returns `New`'s
   errors for a `Config` that does not validate, a `Shutdown` that is not positive, or an engine
   missing a statement; it does no I/O. A nil `OnFailure` keeps the default hook, which logs each

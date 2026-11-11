@@ -13,7 +13,6 @@ The README and each package's `doc.go` document this repository. The
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md) standard states the principles it follows.
 This context records only working knowledge the code and the README do not express.
 
-go-messaging is the root of the `v1.messaging` goal, whose record is `context/goals/v1.messaging.md`.
 The design is the coordinator's `standards-lab/context/messaging.md`. The source is
 spike-messaging's `messaging` modules
 ([github.com/JaimeStill/spike-messaging](https://github.com/JaimeStill/spike-messaging), archived).
