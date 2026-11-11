@@ -15,16 +15,16 @@ import (
 	"github.com/standards-lab/sqlate"
 )
 
-// Runtime is one service's messaging, built from its [Config], the broker
-// its provider supplies, and its database engine's outbox and inbox
-// statements. The broker carries events to and from the service. The outbox
+// Runtime is one service's messaging, built by [Setup.Build] from its
+// [Config], the broker its provider supplies, and its database engine's
+// outbox and inbox statements. The broker carries events to and from the service. The outbox
 // holds the events a command emits until the relay publishes them, and the
 // inbox records the events a consumer has handled. A domain takes Recorder,
 // its one value for emitting events, and records each event in its
 // command's transaction.
 //
 // The failures the relay and the consumers survive, which no caller sees
-// as an error, go to the runtime's [Hook], set with [OnFailure]: each as a
+// as an error, go to the runtime's [Hook], [Setup.OnFailure]: each as a
 // [Failure] naming what failed.
 //
 // A Runtime registers nothing and knows nothing of the coordinator: the
@@ -43,39 +43,103 @@ type Runtime struct {
 	gate     Gate
 }
 
-// New builds a service's messaging from cfg, over broker and the engine's
-// statements, logging to logger. shutdown is the process's drain timeout,
-// which every reactor the runtime builds drains within. New checks cfg,
-// which is finalized, and shutdown, which must be positive. It does no I/O.
-func New(cfg Config, broker Broker, outboxEngine outbox.Engine, inboxEngine inbox.Engine, shutdown time.Duration, logger *slog.Logger, opts ...Option) (*Runtime, error) {
-	if err := cfg.Validate(); err != nil {
+// Setup is what [Setup.Build] builds a service's [Runtime] from. Config,
+// Broker, Outbox, Inbox, Shutdown, and Logger are required; OnFailure and
+// Gate are optional, and nil selects their default.
+type Setup struct {
+	// Config is the service's messaging block, which must be finalized.
+	Config Config
+	// Broker carries the service's events to and from it; it must not be
+	// nil.
+	Broker Broker
+	// Outbox is the database engine's outbox statements, each of which must
+	// be set.
+	Outbox outbox.Engine
+	// Inbox is the database engine's inbox statements, each of which must be
+	// set.
+	Inbox inbox.Engine
+	// Shutdown is the process's drain timeout, which every reactor the
+	// runtime builds drains within; it must be positive.
+	Shutdown time.Duration
+	// Logger is what the runtime logs to; it must not be nil.
+	Logger *slog.Logger
+	// OnFailure is the hook the runtime reports each [Failure] to. When it
+	// is nil, the runtime logs each failure at warn on Logger, as "messaging
+	// failure". The default logs every failure it is given, so during an
+	// outage it logs each failed relay pass, about four a second at the
+	// default poll, and each failed pull of the nats provider's sources, one
+	// per consumer member about every 1.1 seconds, a pull's one-second bound
+	// plus its 100ms wait before the next; a service that wants failures
+	// throttled, counted, or alerted on sets a hook that does so.
+	OnFailure Hook
+	// Gate is the gate the runtime's reactors hold shared. When it is nil,
+	// they hold none; a non-nil interface holding a nil pointer is a set
+	// gate, and is held.
+	//
+	// The relay holds the gate for each outbox row, from before the row's
+	// transaction begins until the transaction commits or rolls back, so a
+	// relay waiting on it opens no transaction and claims no row. Its wait
+	// ends with the relay's stop, and its last pass's with that pass's
+	// bound, either of which claims nothing and reports nothing. Any other
+	// failure of the gate ends the pass and is reported as a
+	// [FailureRelay], leaving the relay ready, since it is not the
+	// database's.
+	//
+	// Each delivery a [Runtime.Consume] reactor handles holds the gate for
+	// the handler's whole call, and the handler is not called until it
+	// does. A wait that the drain ends hands the handler nothing and leaves
+	// the event unacknowledged, for the broker to redeliver. The wait is
+	// bounded by the delivery's AckWait like the handler is: a delivery
+	// that waits on the gate past AckWait is redelivered, and counts
+	// against MaxDeliver, so an event whose last delivery waits that long is
+	// given up unreported. Any other failure of the gate is the delivery's
+	// outcome, as a transient error of the handler's would be: the event is
+	// redelivered, and on its last delivery reported as a
+	// [FailureExhausted].
+	Gate Gate
+}
+
+// Build builds the service's messaging that s describes. It panics, before
+// anything else, when Broker or Logger is nil, a wiring mistake in the
+// caller. It returns an error for a Config that does not validate, a
+// Shutdown that is not positive, or an Outbox or Inbox engine missing a
+// statement. It does no I/O.
+func (s Setup) Build() (*Runtime, error) {
+	if s.Broker == nil {
+		panic("messaging: Setup.Broker is nil")
+	}
+	if s.Logger == nil {
+		panic("messaging: Setup.Logger is nil")
+	}
+	if err := s.Config.Validate(); err != nil {
 		return nil, fmt.Errorf("messaging: config: %w", err)
 	}
-	if shutdown <= 0 {
-		return nil, fmt.Errorf("messaging: shutdown must be positive, got %v", shutdown)
+	if s.Shutdown <= 0 {
+		return nil, fmt.Errorf("messaging: shutdown must be positive, got %v", s.Shutdown)
 	}
-	ob, err := outbox.New(outboxEngine)
+	ob, err := outbox.New(s.Outbox)
 	if err != nil {
 		return nil, fmt.Errorf("messaging: %w", err)
 	}
-	in, err := inbox.New(inboxEngine)
+	in, err := inbox.New(s.Inbox)
 	if err != nil {
 		return nil, fmt.Errorf("messaging: %w", err)
 	}
-	r := &Runtime{
-		Recorder: event.NewRecorder(ob.Sink(), cfg.Source, event.Options{}),
-		broker:   broker,
+	hook := s.OnFailure
+	if hook == nil {
+		hook = logFailures(s.Logger)
+	}
+	return &Runtime{
+		Recorder: event.NewRecorder(ob.Sink(), s.Config.Source, event.Options{}),
+		broker:   s.Broker,
 		outbox:   ob,
 		inbox:    in,
-		cfg:      cfg,
-		shutdown: shutdown,
-		logger:   logger,
-		hook:     logFailures(logger),
-	}
-	for _, opt := range opts {
-		opt(r)
-	}
-	return r, nil
+		cfg:      s.Config,
+		shutdown: s.Shutdown,
+		logger:   s.Logger,
+		hook:     hook,
+		gate:     s.Gate,
+	}, nil
 }
 
 // Relay returns the reactor that publishes the outbox's committed events on
@@ -93,7 +157,7 @@ func New(cfg Config, broker Broker, outboxEngine outbox.Engine, inboxEngine inbo
 // ends as a [FailureRelay], with the event's identity when the relay knew
 // it.
 //
-// Under [Gated], the relay holds the gate shared for each row, from before
+// Under a [Setup.Gate], the relay holds the gate shared for each row, from before
 // the row's transaction begins until it settles.
 func (r *Runtime) Relay(db sqlate.Beginner) *reactor.Reactor[event.Event] {
 	src := r.outbox.Relay(db, r.cfg.RelayPoll.Duration(), outbox.RelayOptions{
@@ -144,7 +208,7 @@ type Claim = func(ctx context.Context, tx *sqlate.Tx) (first bool, err error)
 // only from fn's error, so an event whose last delivery overruns AckWait,
 // with fn returning nil or late, is given up unreported.
 //
-// Under [Gated], each delivery holds the gate shared for fn's whole call,
+// Under a [Setup.Gate], each delivery holds the gate shared for fn's whole call,
 // and fn is not called until it does. A wait that the drain or the
 // delivery's deadline ends hands fn nothing, logs and reports nothing, and
 // leaves the event to be redelivered.
