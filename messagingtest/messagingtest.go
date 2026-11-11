@@ -80,7 +80,7 @@ func member(t *testing.T, b messaging.Broker, sub messaging.Subscription, fn rea
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	r := reactor.New(src, fn)
+	r := reactor.New(src, fn, reactor.Options{})
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

@@ -1,7 +1,7 @@
 # The harness's NATS: the JetStream server the nats module's integration
 # suite connects to through MESSAGING_NATS_URL, creating and deleting a
 # stream per test. This FROM line is NATS's one pin.
-FROM nats:2.15.1-alpine
+FROM nats:2.15.2-alpine
 
 # JetStream on, its store in /data, which compose mounts as tmpfs, and the
 # monitoring endpoint on 8222 for the health check.

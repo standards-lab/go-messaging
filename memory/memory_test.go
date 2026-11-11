@@ -40,7 +40,7 @@ func TestLateOutcomeIgnored(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := reactor.New(src, handler)
+		r := reactor.New(src, handler, reactor.Options{})
 		if err := r.Start(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -114,7 +114,7 @@ func TestUndecodableReportedAndTerminated(t *testing.T) {
 		mu.Unlock()
 		close(got)
 		return nil
-	})
+	}, reactor.Options{})
 	if err := r.Start(context.WithValue(context.Background(), ctxKey{}, "receive")); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestNilReportDiscards(t *testing.T) {
 	r := reactor.New(src, func(_ context.Context, e event.Event) error {
 		got <- e.ID
 		return nil
-	})
+	}, reactor.Options{})
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}

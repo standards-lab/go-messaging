@@ -61,40 +61,77 @@ func config(t *testing.T) messaging.Config {
 	return cfg
 }
 
-// New refuses an engine that is missing a statement, a configuration that
-// is not finalized, and a drain timeout that is not positive.
-func TestNewChecksItsInputs(t *testing.T) {
+// setup is a Setup that builds: over b, the test engines, a finalized
+// configuration, a one-second drain timeout, and logger, with no hook and no
+// gate.
+func setup(t *testing.T, b messaging.Broker, logger *slog.Logger) messaging.Setup {
+	t.Helper()
 	ob, in := engines(t)
-	cfg := config(t)
-	noTimeout := cfg
-	noTimeout.RelayTimeout = 0
-	for name, build := range map[string]func() (*messaging.Runtime, error){
-		"an empty outbox engine": func() (*messaging.Runtime, error) {
-			return messaging.New(cfg, memory.New(), outbox.Engine{}, in, time.Second, slog.Default())
-		},
-		"an empty inbox engine": func() (*messaging.Runtime, error) {
-			return messaging.New(cfg, memory.New(), ob, inbox.Engine{}, time.Second, slog.Default())
-		},
-		"a configuration without its poll": func() (*messaging.Runtime, error) {
-			return messaging.New(messaging.Config{Source: "/test", RelayTimeout: cfg.RelayTimeout}, memory.New(), ob, in, time.Second, slog.Default())
-		},
-		"a configuration without its relay timeout": func() (*messaging.Runtime, error) {
-			return messaging.New(noTimeout, memory.New(), ob, in, time.Second, slog.Default())
-		},
-		"a zero drain timeout": func() (*messaging.Runtime, error) {
-			return messaging.New(cfg, memory.New(), ob, in, 0, slog.Default())
-		},
-	} {
-		if _, err := build(); err == nil {
-			t.Errorf("New accepted %s", name)
-		}
-	}
-	rt, err := messaging.New(cfg, memory.New(), ob, in, time.Second, slog.Default())
+	return messaging.Setup{Config: config(t), Broker: b, Outbox: ob, Inbox: in, Shutdown: time.Second, Logger: logger}
+}
+
+// build builds s, failing the test on an error.
+func build(t *testing.T, s messaging.Setup) *messaging.Runtime {
+	t.Helper()
+	rt, err := s.Build()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.Recorder == nil {
-		t.Error("New left the recorder unset")
+	return rt
+}
+
+// Build refuses an engine that is missing a statement, a configuration that
+// is not finalized, and a drain timeout that is not positive, each with an
+// error naming what it refused.
+func TestBuildChecksItsInputs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(*messaging.Setup)
+		want   string
+	}{
+		"an empty outbox engine": {func(s *messaging.Setup) { s.Outbox = outbox.Engine{} }, "messaging: outbox: "},
+		"an empty inbox engine":  {func(s *messaging.Setup) { s.Inbox = inbox.Engine{} }, "messaging: inbox: "},
+		"a configuration without its poll": {func(s *messaging.Setup) {
+			s.Config = messaging.Config{Source: "/test", RelayTimeout: s.Config.RelayTimeout}
+		}, "messaging: config: "},
+		"a configuration without its relay timeout": {func(s *messaging.Setup) { s.Config.RelayTimeout = 0 }, "messaging: config: "},
+		"a zero drain timeout":                      {func(s *messaging.Setup) { s.Shutdown = 0 }, "messaging: shutdown must be positive, got 0s"},
+		"a negative drain timeout":                  {func(s *messaging.Setup) { s.Shutdown = -time.Second }, "messaging: shutdown must be positive, got -1s"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+			tc.change(&s)
+			rt, err := s.Build()
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+				t.Errorf("Build = %v, %v; want an error starting %q", rt, err, tc.want)
+			}
+		})
+	}
+	if rt := build(t, setup(t, memory.New(), slog.New(slog.DiscardHandler))); rt.Recorder == nil {
+		t.Error("Build left the recorder unset")
+	}
+}
+
+// Build panics naming a nil Broker or Logger before it checks anything
+// else, so a Setup that is also invalid otherwise still panics.
+func TestBuildPanicsOnANilBrokerOrLogger(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(*messaging.Setup)
+		want   string
+	}{
+		"a nil broker": {func(s *messaging.Setup) { s.Broker = nil }, "messaging: Setup.Broker is nil"},
+		"a nil logger": {func(s *messaging.Setup) { s.Logger = nil }, "messaging: Setup.Logger is nil"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+			s.Config, s.Outbox, s.Shutdown = messaging.Config{}, outbox.Engine{}, 0
+			tc.change(&s)
+			defer func() {
+				if got := recover(); got != tc.want {
+					t.Errorf("Build panicked with %v, want %q", got, tc.want)
+				}
+			}()
+			_, _ = s.Build()
+		})
 	}
 }
 
@@ -109,13 +146,9 @@ type payload struct {
 // once with its outcome: a refusal at warn with its error, a failure the
 // broker redelivers as retried, and a success as handled.
 func TestConsume(t *testing.T) {
-	ob, in := engines(t)
 	b := memory.New()
 	var log syncBuffer
-	rt, err := messaging.New(config(t), b, ob, in, time.Second, slog.New(slog.NewTextHandler(&log, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := build(t, setup(t, b, slog.New(slog.NewTextHandler(&log, nil))))
 	type got struct {
 		data  payload
 		claim bool
@@ -252,11 +285,9 @@ func start(t *testing.T, r *reactor.Reactor[event.Event]) {
 // fail gives for its attempt, sending the attempt on the channel returned.
 func consume(t *testing.T, b messaging.Broker, f *failures, sub messaging.Subscription, fail func(attempt int) error) <-chan int {
 	t.Helper()
-	ob, in := engines(t)
-	rt, err := messaging.New(config(t), b, ob, in, time.Second, slog.New(slog.DiscardHandler), messaging.OnFailure(f.hook))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := setup(t, b, slog.New(slog.DiscardHandler))
+	s.OnFailure = f.hook
+	rt := build(t, s)
 	attempts := make(chan int, 16)
 	r, err := rt.Consume(sub, func(ctx context.Context, _ payload, _ messaging.Claim) error {
 		attempt := messaging.Attempt(ctx)
@@ -416,16 +447,12 @@ func TestNoAttemptIsNoExhaustion(t *testing.T) {
 	}
 }
 
-// Without a hook, each failure is logged at warn on the runtime's logger,
-// with its kind, consumer, event, attempt, and error.
-func TestDefaultHookLogsEachFailureAtWarn(t *testing.T) {
-	ob, in := engines(t)
-	b := memory.New()
-	var log syncBuffer
-	rt, err := messaging.New(config(t), b, ob, in, time.Second, slog.New(slog.NewTextHandler(&log, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
+// exhaust builds a runtime from s and starts a consumer over it, with a
+// MaxDeliver of 1, whose handler fails, then publishes event1 to b, so
+// the event is reported once as exhausted.
+func exhaust(t *testing.T, s messaging.Setup, b messaging.Broker) {
+	t.Helper()
+	rt := build(t, s)
 	r, err := rt.Consume(messaging.Subscription{Name: "consumer", MaxDeliver: 1}, func(context.Context, payload, messaging.Claim) error {
 		return errors.New("gave up")
 	})
@@ -436,10 +463,42 @@ func TestDefaultHookLogsEachFailureAtWarn(t *testing.T) {
 	if err := b.Publish(t.Context(), event1); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Without a hook, each failure is logged once at warn on the runtime's
+// logger, with its kind, consumer, event, attempt, and error.
+func TestDefaultHookLogsEachFailureAtWarn(t *testing.T) {
+	b := memory.New()
+	var log syncBuffer
+	exhaust(t, setup(t, b, slog.New(slog.NewTextHandler(&log, nil))), b)
 	const want = `level=WARN msg="messaging failure" kind=exhausted consumer=consumer type=t event=e1 source=/test attempt=1 error="gave up"`
 	waitFor(t, "the failure's log line", func() bool { return strings.Contains(log.String(), "messaging failure") })
 	if !strings.Contains(log.String(), want) {
 		t.Errorf("the log lacks %s:\n%s", want, log.String())
+	}
+	if n := strings.Count(log.String(), "messaging failure"); n != 1 {
+		t.Errorf("logged %d failures, want 1:\n%s", n, log.String())
+	}
+}
+
+// A hook set as OnFailure is given each failure in the default's place, so
+// the runtime logs none.
+func TestOnFailureReplacesTheDefaultHook(t *testing.T) {
+	b := memory.New()
+	var log syncBuffer
+	var f failures
+	s := setup(t, b, slog.New(slog.NewTextHandler(&log, nil)))
+	s.OnFailure = f.hook
+	exhaust(t, s, b)
+	waitFor(t, "the failure", func() bool { return len(f.all()) > 0 })
+	if got := f.all(); len(got) != 1 || got[0].Kind != messaging.FailureExhausted || got[0].EventID != "e1" {
+		t.Errorf("hook got %+v, want e1's exhaustion", got)
+	}
+	// The hook replaced the default rather than joining it, so nothing
+	// logs the failure; the settle time is the default's chance to.
+	time.Sleep(settleTime)
+	if strings.Contains(log.String(), "messaging failure") {
+		t.Errorf("the default hook logged although OnFailure was set:\n%s", log.String())
 	}
 }
 
@@ -465,7 +524,6 @@ func claimEvent(t *testing.T, seq int64, e event.Event) sqltest.Response {
 // ends as a relay failure, each with the event's identity when the relay
 // knew it. Each publish is bounded by the configured relay timeout.
 func TestRelayFailuresReachTheHookClassified(t *testing.T) {
-	ob, in := engines(t)
 	broken := errors.New("connection reset")
 	down := errors.New("broker down")
 	pool, rec := sqltest.Open(t,
@@ -483,11 +541,9 @@ func TestRelayFailuresReachTheHookClassified(t *testing.T) {
 	cfg.RelayTimeout = libconfig.Duration(time.Hour)
 	b := &fakeBroker{fail: map[string]error{"e1": down}}
 	var f failures
-	rt, err := messaging.New(cfg, b, ob, in, time.Second, slog.New(slog.DiscardHandler), messaging.OnFailure(f.hook))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := rt.Relay(db)
+	s := setup(t, b, slog.New(slog.DiscardHandler))
+	s.Config, s.OnFailure = cfg, f.hook
+	r := build(t, s).Relay(db)
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -532,17 +588,14 @@ func TestRelayFailuresReachTheHookClassified(t *testing.T) {
 // A relay row that decodes and is quarantined, its publish refused
 // permanently, carries the event's identity.
 func TestRelayQuarantineCarriesTheEvent(t *testing.T) {
-	ob, in := engines(t)
 	pool, _ := sqltest.Open(t, claimEvent(t, 1, event1), sqltest.Response{Affected: 1}, sqltest.Response{Columns: claimColumns})
 	cfg := config(t)
 	cfg.RelayPoll = libconfig.Duration(time.Hour)
 	b := &fakeBroker{fail: map[string]error{"e1": event.Permanent(errors.New("too large"))}}
 	var f failures
-	rt, err := messaging.New(cfg, b, ob, in, time.Second, slog.New(slog.DiscardHandler), messaging.OnFailure(f.hook))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := rt.Relay(sqlate.Wrap(pool, sqltest.Dialect{}))
+	s := setup(t, b, slog.New(slog.DiscardHandler))
+	s.Config, s.OnFailure = cfg, f.hook
+	r := build(t, s).Relay(sqlate.Wrap(pool, sqltest.Dialect{}))
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}

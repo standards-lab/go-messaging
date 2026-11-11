@@ -15,34 +15,54 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// defaultTimeout bounds the handling of one row unless [Timeout] sets it.
+// defaultTimeout bounds the handling of one row unless
+// [RelayOptions.Timeout] sets it.
 const defaultTimeout = 10 * time.Second
 
-// RelayOption configures a Relay.
-type RelayOption func(*Relay)
+// RelayOptions configures a [Relay]. The zero RelayOptions discards
+// reports, bounds each row's handler at 10s, makes no last pass, and holds
+// no gate.
+type RelayOptions struct {
+	// Report gets each error the relay survives, with the context it was
+	// receiving under: each row it quarantines, as a [*QuarantineError];
+	// each pass a transient publish failure ends, as a [*PublishError];
+	// each database error; and each failure of Gate other than its wait's
+	// context ending. Report has messaging.Report's shape, so a
+	// messaging.Report can be given. It must not block for long, since the
+	// relay waits on it before its next row. Nil discards them.
+	Report func(ctx context.Context, err error)
 
-// Timeout sets the deadline on each row's handler context. The row stays
-// locked while its handler runs, so the timeout bounds how long a hung
-// publish holds it. The row's whole transaction is bounded at twice the
-// timeout, so a stalled database, or a handler that ignores its deadline,
-// rolls the transaction back rather than hold the row and the drain. It
-// must be positive.
-func Timeout(d time.Duration) RelayOption {
-	return func(r *Relay) { r.timeout = d }
-}
+	// Timeout is the deadline on each row's handler context. The row stays
+	// locked while its handler runs, so the timeout bounds how long a hung
+	// publish holds it. The row's whole transaction is bounded at twice the
+	// timeout, so a stalled database, or a handler that ignores its
+	// deadline, rolls the transaction back rather than hold the row and the
+	// drain. Zero means 10s; [Outbox.Relay] panics on a negative Timeout.
+	Timeout time.Duration
 
-// Drain sets how long a relay keeps publishing once it is cancelled. The
-// relay makes one last pass on a context of its own, bounded by d. The pass
-// returns when the outbox is empty or a row fails, so the events committed
-// while the producers drained are published before the process exits rather
-// than at its next start. Once d runs out, the pass claims no further row.
-// A row already claimed settles on its own deadlines, as every row does: its
-// handler's [Timeout] and its transaction's twice that. The reactor's
-// [reactor.CancelAfter] cancels the handler first if it runs out sooner, so
-// set d below it. The default, 0, makes no last pass. d must not be
-// negative.
-func Drain(d time.Duration) RelayOption {
-	return func(r *Relay) { r.drain = d }
+	// Drain is how long the relay keeps publishing once it is cancelled.
+	// The relay makes one last pass on a context of its own, bounded by
+	// Drain. The pass returns when the outbox is empty or a row fails, so
+	// the events committed while the producers drained are published before
+	// the process exits rather than at its next start. Once Drain runs out,
+	// the pass claims no further row. A row already claimed settles on its
+	// own deadlines, as every row does: its handler's Timeout and its
+	// transaction's twice that. The reactor's [reactor.Options.CancelAfter]
+	// cancels the handler first if it runs out sooner, so set Drain below
+	// it. Zero makes no last pass; [Outbox.Relay] panics on a negative
+	// Drain.
+	Drain time.Duration
+
+	// Gate is held shared for each row, from before the row's transaction
+	// begins until it commits or rolls back, so an exclusive holder of Gate
+	// never runs beside a relay's transaction. A relay waiting on Gate
+	// opens no transaction and claims no row. The wait honors the context
+	// the row is claimed under, Receive's or the last pass's, so a wait the
+	// stop or the drain ends claims nothing and reports nothing. Any other
+	// failure of Gate ends the pass and is reported, wrapped, but leaves the
+	// relay ready, since it is not the database's. Nil holds no gate; a
+	// non-nil interface holding a nil pointer is a gate, and is held.
+	Gate Gate
 }
 
 // Gate is what a relay holds while it handles each row: a quiesce gate,
@@ -55,19 +75,6 @@ type Gate interface {
 }
 
 var _ Gate = (*reactor.Gate)(nil)
-
-// Gated sets the gate the relay holds shared for each row, from before the
-// row's transaction begins until it commits or rolls back, so an exclusive
-// holder of g never runs beside a relay's transaction. A relay waiting on
-// g opens no transaction and claims no row. The wait honors the context
-// the row is claimed under, Receive's or the last pass's, so a wait the
-// stop or the drain ends claims nothing and reports nothing. Any other
-// failure of g ends the pass and is reported, wrapped, but leaves the
-// relay ready, since it is not the database's. A nil g, the default,
-// leaves the relay ungated.
-func Gated(g Gate) RelayOption {
-	return func(r *Relay) { r.gate = g }
-}
 
 // Relay is the source of the outbox's committed, unpublished events. A
 // composition root runs it into a reactor whose handler publishes each
@@ -151,8 +158,8 @@ func (e *PublishError) Unwrap() error { return e.Err }
 // no failure ends it. A transient handler error or a database error ends
 // the pass, and both are reported; a database error also makes the relay
 // not ready until a pass succeeds. A row whose handler is running when ctx
-// ends is settled before Receive returns, and a relay with a [Drain] then
-// makes its last pass.
+// ends is settled before Receive returns, and a relay with a
+// [RelayOptions.Drain] then makes its last pass.
 func (r *Relay) Receive(ctx context.Context, fn reactor.Func[event.Event]) error {
 	r.ready.Store(true)
 	defer r.ready.Store(false)
@@ -193,7 +200,7 @@ func (r *Relay) settle(ctx context.Context, err error) bool {
 	return published || gated || ctx.Err() != nil
 }
 
-// gateError is a [Gated] relay's failure to hold its gate other than the
+// gateError is a gated relay's failure to hold its gate other than the
 // wait's context ending: reported, but not the database's failure.
 type gateError struct{ err error }
 
@@ -235,7 +242,7 @@ func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled
 	// database or a handler that ignores its deadline.
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*r.timeout)
 	defer cancel()
-	tx, err := r.db.Begin(settle)
+	tx, err := r.db.Begin(settle, nil)
 	if err != nil {
 		return false, fmt.Errorf("outbox: relay: begin: %w", err)
 	}

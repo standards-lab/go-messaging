@@ -8,5 +8,6 @@ The judgement calls the standards-reviewer applies to go-messaging, beyond what 
 - `architecture/standards/go-elemental/principles/tests-and-docs.md`: the doc.go inventory of each package, and `messagingtest` as the conformance suite every provider runs.
 - `architecture/standards/go-elemental/principles/release-and-ci.md`: the check, currency, and a changelog per module.
 - `architecture/standards/go-elemental/principles/lifecycle-and-context.md`: the runtime and providers as go-core lifecycle values, and their drain.
+- `architecture/standards/go-elemental/principles/construction-and-execution.md`: `messaging.Setup`, whose `Build` panics naming a nil `Broker` or `Logger`; `outbox.RelayOptions`, the one options value `Outbox.Relay` takes; and every new exported function and constructor.
 - `architecture/principles/service-tiers.md`: the standard-tier broker contract and the providers beneath it.
 - `architecture/principles/context-architecture.md`: the README and `doc.go` are the homes.

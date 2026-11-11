@@ -19,16 +19,16 @@
 //   - [Config], the service's messaging block, with [Config.Merge],
 //     [Config.Finalize], and [Config.Validate]; [DefaultRelayPoll] and
 //     [DefaultRelayTimeout]
-//   - [Runtime], one service's messaging, with [New], which builds one;
-//     [Runtime.Relay], the reactor that publishes the outbox; and
+//   - [Runtime], one service's messaging, which [Setup.Build] builds from a
+//     [Setup]; [Runtime.Relay], the reactor that publishes the outbox; and
 //     [Runtime.Consume], which builds a consuming reactor, handing its
 //     handler a [Claim] over the inbox
 //   - [Failure], a failure the runtime survives, and [FailureKind], what
 //     failed: [FailureRelay], [FailureQuarantine], [FailureSource], or
 //     [FailureExhausted]
-//   - [Hook], which receives each Failure; [Option], which configures a
-//     Runtime; [OnFailure], the Option that sets the hook; and [Gated], the
-//     Option that sets the [Gate] the runtime's reactors hold shared
+//   - [Hook], which receives each Failure, and [Gate], which the runtime's
+//     reactors hold shared: the types of the optional fields
+//     [Setup.OnFailure] and [Setup.Gate]
 //
 // # Brokers and subscriptions
 //
@@ -48,9 +48,9 @@
 // through. Its [Runtime.Relay] publishes the outbox, and its
 // [Runtime.Consume] builds a consuming reactor that decodes each event into
 // the consumer's own type and binds its inbox claim. The failures both
-// survive reach the hook [OnFailure] sets, each as a [Failure], and are
-// logged at warn without one. Under [Gated], the relay holds a quiesce
-// gate for each outbox row and a consumer for each delivery, so an
+// survive reach the hook set as [Setup.OnFailure], each as a [Failure], and
+// are logged at warn without one. Under a [Setup.Gate], the relay holds a
+// quiesce gate for each outbox row and a consumer for each delivery, so an
 // operation that holds the gate exclusively runs with both paused.
 // [Config] is the service's messaging configuration block, beside its
 // provider's. The runtime registers nothing: the composition root makes the
@@ -60,7 +60,7 @@
 // # Providers and engines
 //
 // The package imports no broker and no engine: the composition root hands
-// them to [New]. A provider, such as the memory package, implements
+// them to [Setup]. A provider, such as the memory package, implements
 // [Broker], and the messagingtest package holds the conformance suite every
 // provider passes. The outbox and inbox packages run their tables on any
 // engine that supplies the statements; the postgres sub-module is that
