@@ -22,11 +22,12 @@ its provider's.
 ## Packages
 
 - `messaging` (the root) is the broker contract and the runtime: `Broker` and `Publisher`,
-  `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`, the
-  `Runtime` with its `Relay` and `Consume` reactors, the error hook, `Failure`, `Hook`, and
-  `OnFailure`, and the quiesce gate's `Gate` and `Gated`.
+  `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`,
+  `Setup`, whose `Build` builds the `Runtime` with its `Relay` and `Consume` reactors, the error
+  hook's `Failure` and `Hook`, and the quiesce gate's `Gate`.
 - `outbox` writes a command's events in the command's own transaction and relays them to the
-  broker, quarantining a row that can never be published.
+  broker, quarantining a row that can never be published. `Outbox.Relay` takes its report,
+  per-row timeout, last-pass drain, and gate as one `outbox.RelayOptions` value.
 - `inbox` is a consumer's claim on an event, so a redelivery is handled once.
 - `memory` is the in-memory provider, for a service's tests and the conformance double.
 - `messagingtest` is the conformance suite, `Run`, every provider passes.
@@ -45,8 +46,8 @@ for each exported name; each package's `doc.go` inventories its exports.
 
 ### Wiring the runtime
 
-A service builds one `Runtime` from its messaging `Config`, a broker, and its engine's statements.
-The base module imports neither: the composition root hands them over. Declare the engine's
+A service builds one `Runtime` with a `messaging.Setup`: its messaging `Config`, a broker, and its
+engine's statements. The base module imports neither: the composition root hands them over. Declare the engine's
 migration set ahead of the service's own, and call `postgres.Verify` from the verify stage.
 
 ```go
@@ -55,12 +56,21 @@ err := cfg.Finalize("BILLING") // defaults relay_poll and relay_timeout, reads B
 
 set, err := postgres.Migrations() // the messaging set: messaging_outbox and messaging_inbox
 
-rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutdown, logger)
+rt, err := messaging.Setup{
+	Config:   cfg,
+	Broker:   broker,
+	Outbox:   postgres.Outbox(),
+	Inbox:    postgres.Inbox(),
+	Shutdown: shutdown,
+	Logger:   logger,
+}.Build()
 ```
 
-`broker` is any `messaging.Broker`: `memory.New()` in a test, and in production the NATS JetStream
-provider, below. `shutdown` is the process's drain timeout, within which every reactor the runtime builds drains.
-Error handling is elided throughout.
+`Broker` is any `messaging.Broker`: `memory.New()` in a test, and in production the NATS JetStream
+provider, below. `Shutdown` is the process's drain timeout, within which every reactor the runtime
+builds drains. `Build` panics on a nil `Broker` or `Logger`, a wiring mistake, and returns an
+error for a `Config` that is not finalized, a `Shutdown` that is not positive, or an engine missing
+a statement; it does no I/O. Error handling is elided throughout.
 
 A domain emits through `rt.Recorder`, in its command's own transaction, so an event is written
 exactly when the state it reports commits:
@@ -157,17 +167,20 @@ is refused permanently.
 The failures the relay and the consumers survive, which no caller sees as an error, go to the
 runtime's hook, each as a `messaging.Failure` whose `Kind` names what failed: `relay` (a pass
 ended by a transient publish failure or a database error), `quarantine`, `source` (an error a
-consumer's source survived), or `exhausted`. Without a hook, the runtime logs each failure at warn
-as `messaging failure`. The default logs every failure it is given: during an outage, about four a
-second from the relay at the default poll, and from each consumer member on the NATS broker one
-failed pull about every 1.1 seconds, so a service that wants failures throttled, counted, or alerted on
-sets its own:
+consumer's source survived), or `exhausted`. With a nil `Setup.OnFailure`, the runtime logs each
+failure at warn as `messaging failure`. The default logs every failure it is given: during an
+outage, about four a second from the relay at the default poll, and from each consumer member on
+the NATS broker one failed pull about every 1.1 seconds, so a service that wants failures
+throttled, counted, or alerted on sets its own `OnFailure`:
 
 ```go
-rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutdown, logger,
-	messaging.OnFailure(func(ctx context.Context, f messaging.Failure) {
+rt, err := messaging.Setup{
+	Config: cfg, Broker: broker, Outbox: postgres.Outbox(), Inbox: postgres.Inbox(),
+	Shutdown: shutdown, Logger: logger,
+	OnFailure: func(ctx context.Context, f messaging.Failure) {
 		failures.WithLabelValues(string(f.Kind)).Inc()
-	}, nil))
+	},
+}.Build()
 ```
 
 A hook must not block for long: the relay and the consumer wait on it.
@@ -232,14 +245,17 @@ Exhaustion is seen only from the handler's error. An event whose last delivery o
 
 ### The quiesce gate
 
-`messaging.Gated` gives the runtime a gate its reactors hold shared, such as go-core's
+`Setup.Gate` gives the runtime a gate its reactors hold shared, such as go-core's
 `reactor.Gate`, so an operation that holds it exclusively, a restore or a migration, runs with
 the messaging paused:
 
 ```go
 var gate reactor.Gate
-rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutdown, logger,
-	messaging.Gated(&gate))
+rt, err := messaging.Setup{
+	Config: cfg, Broker: broker, Outbox: postgres.Outbox(), Inbox: postgres.Inbox(),
+	Shutdown: shutdown, Logger: logger,
+	Gate: &gate,
+}.Build()
 ```
 
 The relay holds the gate for each outbox row, from before the row's transaction begins until it
@@ -247,7 +263,8 @@ commits or rolls back, so while the gate is held exclusively it opens no transac
 delivery a `Consume` reactor handles holds it for the handler's whole call. A wait the drain ends
 reports nothing: the relay claims no row, and the consumer hands its handler nothing and leaves
 the event for redelivery. A delivery's wait counts against its `AckWait`, so one that waits past
-it is redelivered and counts against `MaxDeliver`. Without `Gated`, nothing holds a gate.
+it is redelivered and counts against `MaxDeliver`. With a nil `Gate`, nothing holds a gate; a
+non-nil interface holding a nil pointer is a set gate, and is held.
 
 ## Development
 
