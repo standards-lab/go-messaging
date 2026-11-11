@@ -17,15 +17,15 @@ import (
 
 // Runtime is one service's messaging, built by [Setup.Build] from its
 // [Config], the broker its provider supplies, and its database engine's
-// outbox and inbox statements. The broker carries events to and from the service. The outbox
-// holds the events a command emits until the relay publishes them, and the
-// inbox records the events a consumer has handled. A domain takes Recorder,
-// its one value for emitting events, and records each event in its
-// command's transaction.
+// outbox and inbox statements. The broker carries events to and from the
+// service. The outbox holds the events a command emits until the relay
+// publishes them, and the inbox records the events a consumer has handled.
+// A domain takes Recorder, its one value for emitting events, and records
+// each event in its command's transaction.
 //
 // The failures the relay and the consumers survive, which no caller sees
-// as an error, go to the runtime's [Hook], [Setup.OnFailure]: each as a
-// [Failure] naming what failed.
+// as an error, go to the runtime's [Hook], set as [Setup.OnFailure]: each
+// as a [Failure] naming what failed.
 //
 // A Runtime registers nothing and knows nothing of the coordinator: the
 // composition root makes the broker and each reactor the runtime builds a
@@ -157,8 +157,8 @@ func (s Setup) Build() (*Runtime, error) {
 // ends as a [FailureRelay], with the event's identity when the relay knew
 // it.
 //
-// Under a [Setup.Gate], the relay holds the gate shared for each row, from before
-// the row's transaction begins until it settles.
+// Under a [Setup.Gate], the relay holds the gate shared for each row, from
+// before the row's transaction begins until it settles.
 func (r *Runtime) Relay(db sqlate.Beginner) *reactor.Reactor[event.Event] {
 	src := r.outbox.Relay(db, r.cfg.RelayPoll.Duration(), outbox.RelayOptions{
 		Report:  func(ctx context.Context, err error) { r.hook(ctx, relayFailure(err)) },
@@ -208,8 +208,8 @@ type Claim = func(ctx context.Context, tx *sqlate.Tx) (first bool, err error)
 // only from fn's error, so an event whose last delivery overruns AckWait,
 // with fn returning nil or late, is given up unreported.
 //
-// Under a [Setup.Gate], each delivery holds the gate shared for fn's whole call,
-// and fn is not called until it does. A wait that the drain or the
+// Under a [Setup.Gate], each delivery holds the gate shared for fn's whole
+// call, and fn is not called until it does. A wait that the drain or the
 // delivery's deadline ends hands fn nothing, logs and reports nothing, and
 // leaves the event to be redelivered.
 func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, data T, claim Claim) error) (*reactor.Reactor[event.Event], error) {

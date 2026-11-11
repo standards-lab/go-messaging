@@ -47,8 +47,9 @@ for each exported name; each package's `doc.go` inventories its exports.
 ### Wiring the runtime
 
 A service builds one `Runtime` with a `messaging.Setup`: its messaging `Config`, a broker, and its
-engine's statements. The base module imports neither: the composition root hands them over. Declare the engine's
-migration set ahead of the service's own, and call `postgres.Verify` from the verify stage.
+engine's statements. The base module imports neither: the composition root hands them over.
+Declare the engine's migration set ahead of the service's own, and call `postgres.Verify` from the
+verify stage.
 
 ```go
 cfg := messaging.Config{Source: "/billing"}

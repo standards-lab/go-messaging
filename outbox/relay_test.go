@@ -513,7 +513,7 @@ func TestReadyFromTheStartOfReceive(t *testing.T) {
 }
 
 // Relay panics on a poll that is not positive and on a negative Timeout or
-// Drain; a zero Timeout takes the default.
+// Drain, and accepts a zero Timeout and Drain, the defaults.
 func TestRelayPanicsOnABadPollTimeoutOrDrain(t *testing.T) {
 	db, _ := open(t)
 	ob := newOutbox(t)
