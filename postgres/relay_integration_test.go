@@ -54,9 +54,9 @@ func (r *recorder) record(_ context.Context, e event.Event) error {
 
 // relay starts a reactor over a new relay on db and shuts it down when the
 // test ends, unless the test stops it first.
-func relay(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event], opts ...reactor.Option) *reactor.Reactor[event.Event] {
+func relay(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event], opts reactor.Options) *reactor.Reactor[event.Event] {
 	t.Helper()
-	r := reactor.New(ob.Relay(db, poll, nil), fn, opts...)
+	r := reactor.New(ob.Relay(db, poll, outbox.RelayOptions{}), fn, opts)
 	if err := r.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func observe(t *testing.T, b *memory.Broker) *recorder {
 		t.Fatal(err)
 	}
 	rec := &recorder{}
-	r := reactor.New(src, rec.record)
+	r := reactor.New(src, rec.record, reactor.Options{})
 	if err := r.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestRelayPublishesInEmissionOrder(t *testing.T) {
 	db := migrated(t)
 	emitEach(t, db, ids(1, 5)...)
 	rec := &recorder{}
-	r := relay(t, db, rec.record)
+	r := relay(t, db, rec.record, reactor.Options{})
 	eventually(t, "five events", func() bool { return len(rec.seen()) == 5 })
 	if got := rec.seen(); !slices.Equal(got, ids(1, 5)) {
 		t.Fatalf("published %v, want %v", got, ids(1, 5))
@@ -155,7 +155,7 @@ func TestStopBetweenCommitAndPublishLosesNoEvent(t *testing.T) {
 			return ctx.Err()
 		}
 		return b.Publish(ctx, e)
-	}, reactor.CancelAfter(50*time.Millisecond))
+	}, reactor.Options{CancelAfter: 50 * time.Millisecond})
 	<-entered
 	err := first.Shutdown(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "handlers cancelled") {
@@ -166,7 +166,7 @@ func TestStopBetweenCommitAndPublishLosesNoEvent(t *testing.T) {
 	}
 
 	emitEach(t, db, "4")
-	relay(t, db, b.Publish)
+	relay(t, db, b.Publish, reactor.Options{})
 	eventually(t, "four deliveries", func() bool { return len(rec.seen()) == 4 })
 	if got := rec.seen(); !slices.Equal(got, ids(1, 4)) {
 		t.Fatalf("delivered %v, want %v", got, ids(1, 4))
@@ -189,7 +189,7 @@ func TestFailedPublishIsRetriedInOrder(t *testing.T) {
 			return errors.New("broker unavailable")
 		}
 		return nil
-	})
+	}, reactor.Options{})
 	eventually(t, "three attempts", func() bool { return len(rec.seen()) == 3 })
 	if got, want := rec.seen(), []string{"1", "1", "2"}; !slices.Equal(got, want) {
 		t.Fatalf("attempts %v, want %v: a failed row is retried before the rows after it", got, want)
@@ -215,7 +215,7 @@ func TestPublishedButUnmarkedIsRepublished(t *testing.T) {
 		var err error
 		once.Do(func() { err = errors.New("stopped before the mark") })
 		return err
-	})
+	}, reactor.Options{})
 	eventually(t, "no pending rows", drained(t, db))
 	if got := published.seen(); !slices.Equal(got, []string{"1", "1"}) {
 		t.Fatalf("published %v, want event 1 twice", got)
@@ -235,8 +235,8 @@ func TestRelaysPublishEachRowOnce(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 		return rec.record(ctx, e)
 	}
-	relay(t, db, slow)
-	relay(t, db, slow)
+	relay(t, db, slow, reactor.Options{})
+	relay(t, db, slow, reactor.Options{})
 	eventually(t, "no pending rows", drained(t, db))
 	got := rec.seen()
 	slices.SortFunc(got, func(a, b string) int {
@@ -264,12 +264,12 @@ func TestShutdownSettlesTheRowInFlight(t *testing.T) {
 	db := migrated(t)
 	emitEach(t, db, "1")
 	entered, release := make(chan struct{}), make(chan struct{})
-	src := watched{ob.Relay(db, poll, nil), make(chan struct{})}
+	src := watched{ob.Relay(db, poll, outbox.RelayOptions{}), make(chan struct{})}
 	r := reactor.New[event.Event](src, func(context.Context, event.Event) error {
 		close(entered)
 		<-release
 		return nil
-	})
+	}, reactor.Options{})
 	if err := r.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func (r *reports) all() []error {
 func reporting(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event]) (*reactor.Reactor[event.Event], *reports) {
 	t.Helper()
 	rep := &reports{}
-	r := reactor.New(ob.Relay(db, poll, rep.report), fn)
+	r := reactor.New(ob.Relay(db, poll, outbox.RelayOptions{Report: rep.report}), fn, reactor.Options{})
 	if err := r.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ func assertNothingPending(t *testing.T, db *sqlate.DB, r *reactor.Reactor[event.
 func TestDatabaseErrorMakesTheRelayNotReady(t *testing.T) {
 	db := migrated(t)
 	rec := &recorder{}
-	r := relay(t, db, rec.record)
+	r := relay(t, db, rec.record, reactor.Options{})
 	eventually(t, "a ready relay", r.Ready)
 	if _, err := db.ExecContext(t.Context(), `ALTER TABLE messaging_outbox RENAME TO messaging_outbox_away`); err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestTimeoutEndsAHungHandler(t *testing.T) {
 	var once sync.Once
 	var first error
 	rec := &recorder{}
-	rel := reactor.New[event.Event](ob.Relay(db, poll, nil, outbox.Timeout(50*time.Millisecond)),
+	rel := reactor.New[event.Event](ob.Relay(db, poll, outbox.RelayOptions{Timeout: 50 * time.Millisecond}),
 		func(ctx context.Context, e event.Event) error {
 			hung := false
 			once.Do(func() { hung = true })
@@ -470,7 +470,7 @@ func TestTimeoutEndsAHungHandler(t *testing.T) {
 				return first
 			}
 			return rec.record(ctx, e)
-		})
+		}, reactor.Options{})
 	if err := rel.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -490,12 +490,12 @@ func TestTransactionBoundOutlastsAHandlerThatIgnoresItsDeadline(t *testing.T) {
 	const timeout = 50 * time.Millisecond
 	var once sync.Once
 	rec := &recorder{}
-	relay := reactor.New[event.Event](ob.Relay(db, poll, nil, outbox.Timeout(timeout)),
+	relay := reactor.New[event.Event](ob.Relay(db, poll, outbox.RelayOptions{Timeout: timeout}),
 		func(ctx context.Context, e event.Event) error {
 			rec.add(e.ID)
 			once.Do(func() { time.Sleep(3 * timeout) }) // ignores ctx
 			return nil
-		})
+		}, reactor.Options{})
 	if err := relay.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestMarkThatChangesNoRowFailsThePass(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &recorder{}
-	r := reactor.New[event.Event](broken.Relay(db, poll, nil), rec.record)
+	r := reactor.New[event.Event](broken.Relay(db, poll, outbox.RelayOptions{}), rec.record, reactor.Options{})
 	if err := r.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -542,17 +542,17 @@ func compileMark(t *testing.T, text string) query.Statement {
 func TestDrainPublishesWhatWasCommittedBeforeTheStop(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		opts    []outbox.RelayOption
+		opts    outbox.RelayOptions
 		pending int
 	}{
-		{"with a drain", []outbox.RelayOption{outbox.Drain(5 * time.Second)}, 0},
-		{"without one", nil, 3},
+		{"with a drain", outbox.RelayOptions{Drain: 5 * time.Second}, 0},
+		{"without one", outbox.RelayOptions{}, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := migrated(t)
 			b := memory.New()
 			rec := observe(t, b)
-			r := reactor.New[event.Event](ob.Relay(db, time.Hour, nil, tc.opts...), b.Publish, reactor.CancelAfter(10*time.Second))
+			r := reactor.New[event.Event](ob.Relay(db, time.Hour, tc.opts), b.Publish, reactor.Options{CancelAfter: 10 * time.Second})
 			if err := r.Start(t.Context()); err != nil {
 				t.Fatal(err)
 			}

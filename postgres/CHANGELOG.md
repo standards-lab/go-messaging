@@ -7,6 +7,28 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-11-11
+
+### Changed
+
+- **Breaking:** The `go-messaging` requirement is v0.3.0, which builds a service's runtime with
+  `messaging.Setup{...}.Build()` in place of `messaging.New` and its `Option`, `OnFailure`, and
+  `Gated`, and takes `outbox.Outbox.Relay`'s report and options as one `outbox.RelayOptions`
+  in place of its `report` parameter and `RelayOption`, `outbox.Timeout`, `outbox.Drain`, and
+  `outbox.Gated`. The base module's v0.3.0 entry migrates each. `Outbox` and `Inbox` are
+  unchanged.
+- **Breaking:** The `go-core` requirement is v0.12.0, whose `reactor.New` and
+  `event.NewRecorder` take a trailing Options struct in place of variadic option functions, and
+  which pulls go-core v0.11.0's graph changes into an importer's build. go-core's changelog
+  migrates each.
+- **Breaking:** The `sqlate` requirement is v0.7.0, whose `DB.Begin`, `DB.Transact`, and
+  `Transact` take a trailing `*sql.TxOptions` in place of variadic `TxOption` values, and whose
+  `Beginner` has `DB.Begin`'s new signature. sqlate's changelog migrates each. `Verify`,
+  `Pending`, and the retentions are unchanged.
+- **Breaking:** The `sqlate/postgres` requirement is v0.7.0, which carries the same sqlate
+  requirement; the dialect's own API is unchanged.
+- pgx is v5.13.0, and the `sqlate/sqlint` tool v0.4.0, whose findings are unchanged.
+
 ## [v0.2.0] - 2026-10-15
 
 ### Added
@@ -47,6 +69,7 @@ changelog covers this sub-module only; the base module keeps its own.
 - The module requires `go-messaging` v0.1.0, `sqlate` and `sqlate/postgres` v0.5.0, and pgx
   v5.11.0, with the `sqlate/sqlint` tool at v0.3.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.2.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.2.0...postgres/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.1.0...postgres/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/postgres/v0.1.0

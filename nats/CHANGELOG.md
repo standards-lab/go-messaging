@@ -7,10 +7,22 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-11-11
+
 ### Changed
 
-- The module requires `go-messaging` v0.2.0, which adds the `Gated` option and `outbox.Gate`;
-  nothing in this module changes with it.
+- **Breaking:** The `go-messaging` requirement is v0.3.0, which builds a service's runtime with
+  `messaging.Setup{...}.Build()` in place of `messaging.New` and its `Option`, `OnFailure`, and
+  `Gated`, and takes `outbox.Outbox.Relay`'s report and options as one `outbox.RelayOptions`
+  in place of its `report` parameter and `RelayOption`, `outbox.Timeout`, `outbox.Drain`, and
+  `outbox.Gated`. The base module's v0.3.0 entry migrates each. It takes in v0.2.0's quiesce
+  gate, now set as `Setup.Gate` and `RelayOptions.Gate`. The broker and its sources are
+  unchanged.
+- **Breaking:** The `go-core` requirement is v0.12.0, whose `reactor.New` and
+  `event.NewRecorder` take a trailing Options struct in place of variadic option functions, and
+  which pulls go-core v0.11.0's graph changes into an importer's build. go-core's changelog
+  migrates each.
+- nats.go is v1.55.0.
 
 ## [v0.2.0] - 2026-10-14
 
@@ -61,6 +73,7 @@ changelog covers this sub-module only; the base module keeps its own.
   (`nats:2.15.1-alpine`, JetStream on tmpfs), through `mise run integration:nats`.
 - The module requires `go-messaging` v0.1.0, go-core v0.10.0, and nats.go v1.54.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...nats/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.1.0...nats/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/nats/v0.1.0

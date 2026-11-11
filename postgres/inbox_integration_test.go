@@ -38,7 +38,7 @@ func claim(t *testing.T, db *sqlate.DB, consumer string, e event.Event, rollback
 			return struct{}{}, undo
 		}
 		return struct{}{}, nil
-	})
+	}, nil)
 	if err != nil && !errors.Is(err, undo) {
 		t.Fatalf("claim: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestClaimKeysOnSourceAndID(t *testing.T) {
 
 func TestClaimRequiresAConsumer(t *testing.T) {
 	db := migrated(t)
-	tx, err := db.Begin(t.Context())
+	tx, err := db.Begin(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestClaimAcrossAckWait(t *testing.T) {
 			work++
 			mu.Unlock()
 			return struct{}{}, nil
-		})
+		}, nil)
 		return err
 	}
 	for range 2 {
@@ -141,7 +141,7 @@ func TestClaimAcrossAckWait(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := reactor.New(src, handler)
+		r := reactor.New(src, handler, reactor.Options{})
 		if err := r.Start(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,10 @@ func TestConsumeClaimsUnderTheSubscription(t *testing.T) {
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatal(err)
 	}
-	rt, err := messaging.New(cfg, b, postgres.Outbox(), postgres.Inbox(), time.Second, slog.New(slog.DiscardHandler))
+	rt, err := messaging.Setup{
+		Config: cfg, Broker: b, Outbox: postgres.Outbox(), Inbox: postgres.Inbox(),
+		Shutdown: time.Second, Logger: slog.New(slog.DiscardHandler),
+	}.Build()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +189,7 @@ func TestConsumeClaimsUnderTheSubscription(t *testing.T) {
 	r, err := rt.Consume(sub, func(ctx context.Context, _ struct{}, claim messaging.Claim) error {
 		var got []bool
 		for range 2 {
-			first, err := sqlate.Transact(ctx, db, func(tx *sqlate.Tx) (bool, error) { return claim(ctx, tx) })
+			first, err := sqlate.Transact(ctx, db, func(tx *sqlate.Tx) (bool, error) { return claim(ctx, tx) }, nil)
 			if err != nil {
 				return err
 			}
@@ -234,14 +237,17 @@ func TestRuntimeLogsTheTraffic(t *testing.T) {
 	if err := cfg.Finalize(""); err != nil {
 		t.Fatal(err)
 	}
-	rt, err := messaging.New(cfg, b, postgres.Outbox(), postgres.Inbox(), time.Second, slog.New(slog.NewTextHandler(&log, nil)))
+	rt, err := messaging.Setup{
+		Config: cfg, Broker: b, Outbox: postgres.Outbox(), Inbox: postgres.Inbox(),
+		Shutdown: time.Second, Logger: slog.New(slog.NewTextHandler(&log, nil)),
+	}.Build()
 	if err != nil {
 		t.Fatal(err)
 	}
 	handled := make(chan event.Event, 2)
 	sub := messaging.Subscription{Name: "billing", Types: []string{"lab.demo.tick"}}
 	consumer, err := rt.Consume(sub, func(ctx context.Context, _ struct{}, claim messaging.Claim) error {
-		_, err := sqlate.Transact(ctx, db, func(tx *sqlate.Tx) (bool, error) { return claim(ctx, tx) })
+		_, err := sqlate.Transact(ctx, db, func(tx *sqlate.Tx) (bool, error) { return claim(ctx, tx) }, nil)
 		handled <- event.Event{}
 		return err
 	})

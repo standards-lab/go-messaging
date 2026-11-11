@@ -69,7 +69,7 @@ func transact(t *testing.T, db *sqlate.DB, events ...event.Event) error {
 	t.Helper()
 	_, err := sqlate.Transact(t.Context(), db, func(tx *sqlate.Tx) (struct{}, error) {
 		return struct{}{}, ob.Sink().Write(t.Context(), tx, events...)
-	})
+	}, nil)
 	return err
 }
 
@@ -206,7 +206,7 @@ func TestVerifyNeedsTheMigratedSchema(t *testing.T) {
 
 func TestEmitIsVisibleOnlyAfterCommit(t *testing.T) {
 	db := migrated(t)
-	tx, err := db.Begin(t.Context())
+	tx, err := db.Begin(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestRollbackLeavesNoRow(t *testing.T) {
 			return struct{}{}, err
 		}
 		return struct{}{}, boom
-	})
+	}, nil)
 	if !errors.Is(err, boom) {
 		t.Fatalf("transact = %v, want %v", err, boom)
 	}
@@ -308,7 +308,7 @@ var kindTicked = event.Define[ticked]("lab.demo.ticked")
 // fails, so the rows exist exactly when the state they report committed.
 func TestRecorderEmitsIntoTheCommandsTransaction(t *testing.T) {
 	db := migrated(t)
-	rec := event.NewRecorder(ob.Sink(), "/outbox-test")
+	rec := event.NewRecorder(ob.Sink(), "/outbox-test", event.Options{})
 	body := func(fail error) func(*sqlate.Tx, *event.Queue) (int, error) {
 		return func(tx *sqlate.Tx, q *event.Queue) (int, error) {
 			if _, err := tx.ExecContext(t.Context(), `SELECT 1`); err != nil {
@@ -320,13 +320,13 @@ func TestRecorderEmitsIntoTheCommandsTransaction(t *testing.T) {
 		}
 	}
 	boom := errors.New("command refused")
-	if _, err := sqlate.Transact(t.Context(), db, rec.Emit(t.Context(), body(boom))); !errors.Is(err, boom) {
+	if _, err := sqlate.Transact(t.Context(), db, rec.Emit(t.Context(), body(boom)), nil); !errors.Is(err, boom) {
 		t.Fatalf("failing command = %v, want %v", err, boom)
 	}
 	if total, _ := rows(t, db); total != 0 {
 		t.Fatalf("after a failed command, %d rows exist", total)
 	}
-	n, err := sqlate.Transact(t.Context(), db, rec.Emit(t.Context(), body(nil)))
+	n, err := sqlate.Transact(t.Context(), db, rec.Emit(t.Context(), body(nil)), nil)
 	if err != nil || n != 2 {
 		t.Fatalf("command = %d, %v", n, err)
 	}
