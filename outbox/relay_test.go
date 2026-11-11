@@ -134,7 +134,7 @@ func TestRelayPublishesInSeqOrderOneRowPerTransaction(t *testing.T) {
 	)
 	var rep reports
 	var pub publisher
-	runPass(t, newOutbox(t).Relay(db, noPoll, rep.report), rec, pub.publish)
+	runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report}), rec, pub.publish)
 
 	if got := pub.published(); !slices.Equal(got, []string{"a", "b"}) {
 		t.Errorf("published %v, want [a b]", got)
@@ -171,7 +171,7 @@ func TestCorruptRowIsQuarantinedAndTheNextRowPublishes(t *testing.T) {
 			)
 			var rep reports
 			var pub publisher
-			runPass(t, newOutbox(t).Relay(db, noPoll, rep.report), rec, pub.publish)
+			runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report}), rec, pub.publish)
 
 			if got := pub.published(); !slices.Equal(got, []string{"b"}) {
 				t.Errorf("published %v, want [b]: the corrupt row is never handed to the handler", got)
@@ -210,7 +210,7 @@ func TestPermanentPublishFailureIsQuarantinedAndTheNextRowPublishes(t *testing.T
 	)
 	var rep reports
 	pub := publisher{fail: map[string]error{"a": event.Permanent(cause)}}
-	runPass(t, newOutbox(t).Relay(db, noPoll, rep.report), rec, pub.publish)
+	runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report}), rec, pub.publish)
 
 	if got := pub.published(); !slices.Equal(got, []string{"a", "b"}) {
 		t.Errorf("published %v, want [a b]: the pass goes on past the quarantined row", got)
@@ -243,7 +243,7 @@ func TestTransientPublishFailureEndsThePassAndIsReported(t *testing.T) {
 	db, rec := open(t, claimEvent(t, 1, testEvent("a")))
 	var rep reports
 	pub := publisher{fail: map[string]error{"a": cause}}
-	r := newOutbox(t).Relay(db, noPoll, rep.report)
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -284,7 +284,7 @@ func TestQuarantineFailureEndsThePass(t *testing.T) {
 	db, rec := open(t, claim(1, []byte("not json"), nil), sqltest.Response{Err: broken})
 	var rep reports
 	var pub publisher
-	r := newOutbox(t).Relay(db, noPoll, rep.report)
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -314,7 +314,7 @@ func TestDatabaseErrorIsReportedAndMakesTheRelayNotReadyUntilAPassSucceeds(t *te
 	db, rec := open(t, sqltest.Response{Err: broken})
 	var rep reports
 	var pub publisher
-	r := newOutbox(t).Relay(db, time.Millisecond, rep.report)
+	r := newOutbox(t).Relay(db, time.Millisecond, outbox.RelayOptions{Report: rep.report})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -341,7 +341,7 @@ func TestMarkThatChangesNoRowFailsThePass(t *testing.T) {
 	db, rec := open(t, claimEvent(t, 1, testEvent("a")), sqltest.Response{Affected: 0})
 	var rep reports
 	var pub publisher
-	runPass(t, newOutbox(t).Relay(db, noPoll, rep.report), rec, pub.publish)
+	runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report}), rec, pub.publish)
 
 	errs := rep.all()
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "changed 0 rows") {
@@ -356,7 +356,7 @@ func TestQuarantineThatChangesNoRowFailsThePass(t *testing.T) {
 	db, rec := open(t, claim(1, []byte("not json"), nil), sqltest.Response{Affected: 0})
 	var rep reports
 	var pub publisher
-	runPass(t, newOutbox(t).Relay(db, noPoll, rep.report), rec, pub.publish)
+	runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report}), rec, pub.publish)
 
 	errs := rep.all()
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "changed 0 rows") {
@@ -370,7 +370,7 @@ func TestQuarantineThatChangesNoRowFailsThePass(t *testing.T) {
 func TestTimeoutEndsAHungHandler(t *testing.T) {
 	db, rec := open(t, claimEvent(t, 1, testEvent("a")))
 	var rep reports
-	r := newOutbox(t).Relay(db, noPoll, rep.report, outbox.Timeout(20*time.Millisecond))
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report, Timeout: 20 * time.Millisecond})
 	hung := func(ctx context.Context, _ event.Event) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -389,7 +389,7 @@ func TestTimeoutEndsAHungHandler(t *testing.T) {
 func TestStopSettlesTheRowInFlight(t *testing.T) {
 	db, rec := open(t, claimEvent(t, 1, testEvent("a")), affected)
 	var rep reports
-	r := newOutbox(t).Relay(db, noPoll, rep.report)
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -424,7 +424,7 @@ func TestDrainPublishesWhatWasCommittedBeforeTheStop(t *testing.T) {
 	)
 	var rep reports
 	var pub publisher
-	r := newOutbox(t).Relay(db, noPoll, rep.report, outbox.Drain(time.Second))
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report, Drain: time.Second})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := r.Receive(ctx, pub.publish); err != nil {
@@ -445,7 +445,7 @@ func TestDrainPublishesWhatWasCommittedBeforeTheStop(t *testing.T) {
 func TestNoDrainMakesNoLastPass(t *testing.T) {
 	db, rec := open(t)
 	var pub publisher
-	r := newOutbox(t).Relay(db, noPoll, nil)
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := r.Receive(ctx, pub.publish); err != nil {
@@ -467,7 +467,7 @@ func TestReportGetsTheReceivingContext(t *testing.T) {
 		got = append(got, ctx.Value(key{}))
 	}
 	var pub publisher
-	r := newOutbox(t).Relay(db, noPoll, report)
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: report})
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), key{}, "receiving"))
 	done := make(chan error, 1)
 	go func() { done <- r.Receive(ctx, pub.publish) }()
@@ -486,7 +486,7 @@ func TestReportGetsTheReceivingContext(t *testing.T) {
 func TestNilReportDiscards(t *testing.T) {
 	db, rec := open(t, claim(1, []byte("not json"), nil), affected, noRow)
 	var pub publisher
-	runPass(t, newOutbox(t).Relay(db, noPoll, nil), rec, pub.publish)
+	runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{}), rec, pub.publish)
 	if q := execArgs(rec, "SET q"); len(q) != 1 {
 		t.Errorf("quarantined %v, want row 1 without a report function", q)
 	}
@@ -494,7 +494,7 @@ func TestNilReportDiscards(t *testing.T) {
 
 func TestReadyFromTheStartOfReceive(t *testing.T) {
 	db, _ := open(t, noRow)
-	r := newOutbox(t).Relay(db, noPoll, nil)
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{})
 	if r.Ready() {
 		t.Error("ready before Receive")
 	}
@@ -512,21 +512,128 @@ func TestReadyFromTheStartOfReceive(t *testing.T) {
 	}
 }
 
-func TestRelayRefusesABadOption(t *testing.T) {
+// Relay panics on a poll that is not positive and on a negative Timeout or
+// Drain; a zero Timeout takes the default.
+func TestRelayPanicsOnABadPollTimeoutOrDrain(t *testing.T) {
 	db, _ := open(t)
 	ob := newOutbox(t)
 	for name, build := range map[string]func(){
-		"poll":    func() { ob.Relay(db, 0, nil) },
-		"timeout": func() { ob.Relay(db, time.Second, nil, outbox.Timeout(0)) },
-		"drain":   func() { ob.Relay(db, time.Second, nil, outbox.Drain(-1)) },
+		"zero poll":        func() { ob.Relay(db, 0, outbox.RelayOptions{}) },
+		"negative poll":    func() { ob.Relay(db, -time.Second, outbox.RelayOptions{}) },
+		"negative timeout": func() { ob.Relay(db, time.Second, outbox.RelayOptions{Timeout: -1}) },
+		"negative drain":   func() { ob.Relay(db, time.Second, outbox.RelayOptions{Drain: -1}) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
 				if recover() == nil {
-					t.Errorf("Relay accepted a bad %s", name)
+					t.Errorf("Relay accepted a %s", name)
 				}
 			}()
 			build()
 		})
+	}
+	ob.Relay(db, time.Second, outbox.RelayOptions{Timeout: 0, Drain: 0})
+}
+
+// Each row's handler runs under the deadline Timeout sets, 10s when it is
+// zero.
+func TestTimeoutBoundsEachHandler(t *testing.T) {
+	for name, tc := range map[string]struct {
+		timeout, want time.Duration
+	}{
+		"zero, the default": {0, 10 * time.Second},
+		"positive":          {3 * time.Second, 3 * time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, rec := open(t, claimEvent(t, 1, testEvent("a")), affected, noRow)
+			var left time.Duration
+			handler := func(ctx context.Context, _ event.Event) error {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Error("the handler's context has no deadline")
+				}
+				left = time.Until(deadline)
+				return nil
+			}
+			runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Timeout: tc.timeout}), rec, handler)
+			if left > tc.want || left < tc.want-time.Second {
+				t.Errorf("the handler had %v left, want just under %v", left, tc.want)
+			}
+		})
+	}
+}
+
+// heldGate counts the holders of a gate that never makes one wait.
+type heldGate struct {
+	mu            sync.Mutex
+	held, granted int
+}
+
+func (g *heldGate) Shared(context.Context) (func(), error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.held++
+	g.granted++
+	return func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.held--
+	}, nil
+}
+
+func (g *heldGate) counts() (held, granted int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held, g.granted
+}
+
+// A relay with a Gate holds it shared for each row, through the row's
+// handler, and releases it once the row settles.
+func TestGateIsHeldSharedForEachRow(t *testing.T) {
+	db, rec := open(t,
+		claimEvent(t, 1, testEvent("a")), affected,
+		claimEvent(t, 2, testEvent("b")), affected,
+		noRow,
+	)
+	var g heldGate
+	handler := func(context.Context, event.Event) error {
+		if held, _ := g.counts(); held != 1 {
+			t.Errorf("the handler ran with %d holders of the gate, want 1", held)
+		}
+		return nil
+	}
+	runPass(t, newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Gate: &g}), rec, handler)
+	if held, granted := g.counts(); held != 0 || granted != 3 {
+		t.Errorf("the gate has %d holders after %d grants, want 0 after 3: one per claim", held, granted)
+	}
+}
+
+// nilGate is a gate whose nil pointer refuses every holder.
+type nilGate struct{}
+
+var errNilGate = errors.New("nil gate")
+
+func (*nilGate) Shared(context.Context) (func(), error) { return nil, errNilGate }
+
+// A Gate that is a non-nil interface holding a nil pointer is set: the
+// relay holds it, and reports its failure without opening a transaction.
+func TestGateHoldingANilPointerIsHeld(t *testing.T) {
+	db, rec := open(t)
+	var rep reports
+	var pub publisher
+	r := newOutbox(t).Relay(db, noPoll, outbox.RelayOptions{Report: rep.report, Gate: (*nilGate)(nil)})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Receive(ctx, pub.publish) }()
+	waitFor(t, "the gate's failure", func() bool { return len(rep.all()) > 0 })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Receive = %v, want nil", err)
+	}
+	if errs := rep.all(); len(errs) != 1 || !errors.Is(errs[0], errNilGate) {
+		t.Errorf("reported %v, want the nil gate's failure", errs)
+	}
+	if ops := rec.Ops(); len(ops) != 0 {
+		t.Errorf("ops = %v, want none: the gate refused the row", ops)
 	}
 }

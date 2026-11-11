@@ -96,9 +96,14 @@ func New(cfg Config, broker Broker, outboxEngine outbox.Engine, inboxEngine inbo
 // Under [Gated], the relay holds the gate shared for each row, from before
 // the row's transaction begins until it settles.
 func (r *Runtime) Relay(db sqlate.Beginner) *reactor.Reactor[event.Event] {
-	report := func(ctx context.Context, err error) { r.hook(ctx, relayFailure(err)) }
-	src := r.outbox.Relay(db, r.cfg.RelayPoll.Duration(), report,
-		outbox.Timeout(r.cfg.RelayTimeout.Duration()), outbox.Drain(r.shutdown/4), outbox.Gated(r.gate))
+	src := r.outbox.Relay(db, r.cfg.RelayPoll.Duration(), outbox.RelayOptions{
+		Report:  func(ctx context.Context, err error) { r.hook(ctx, relayFailure(err)) },
+		Timeout: r.cfg.RelayTimeout.Duration(),
+		Drain:   r.shutdown / 4,
+		// A nil runtime gate converts to a nil outbox.Gate, so the relay
+		// holds none.
+		Gate: r.gate,
+	})
 	publish := func(ctx context.Context, e event.Event) error {
 		if err := r.broker.Publish(ctx, e); err != nil {
 			return err

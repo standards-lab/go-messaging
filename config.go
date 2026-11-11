@@ -23,7 +23,7 @@ const (
 // service's CloudEvents source, one value for every replica. RelayPoll is
 // how long the relay waits between passes once the outbox is empty. RelayTimeout bounds the relay's publish of one
 // event, and so how long a hung publish holds the event's outbox row; it is
-// the relay's outbox.Timeout.
+// the relay's outbox.RelayOptions.Timeout.
 type Config struct {
 	Source       string             `json:"source"`
 	RelayPoll    libconfig.Duration `json:"relay_poll"`

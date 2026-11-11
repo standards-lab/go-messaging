@@ -10,9 +10,9 @@
 //   - [Relay], the reactor source of the committed, unpublished events, with
 //     [Relay.Receive], which runs its passes, and [Relay.Ready], its
 //     readiness
-//   - [RelayOption], which configures a Relay: [Timeout], the bound on one
-//     row's handler; [Drain], the last pass after cancellation; and
-//     [Gated], the [Gate] the relay holds shared for each row
+//   - [RelayOptions], which configures a Relay: its report of the errors
+//     it survives, the bound on one row's handler, the last pass after
+//     cancellation, and the [Gate] it holds shared for each row
 //   - [QuarantineError], the relay's report of a row it quarantined, and
 //     [PublishError], its report of a transient publish failure
 //
