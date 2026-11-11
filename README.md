@@ -70,7 +70,7 @@ _, err := sqlate.Transact(ctx, db, rt.Recorder.Emit(ctx, func(tx *sqlate.Tx, q *
 	// ... the command's writes on tx ...
 	InvoiceIssued.Raise(q, invoiceID, InvoiceIssuedData{Amount: amount})
 	return struct{}{}, nil
-}))
+}), nil)
 ```
 
 ### The NATS broker
@@ -142,7 +142,7 @@ ledger := g.Define("ledger", func(s *graph.Scope) (*reactor.Reactor[event.Event]
 			}
 			// ... the consumer's work on tx ...
 			return struct{}{}, nil
-		})
+		}, nil)
 		return err
 	})
 })
@@ -167,7 +167,7 @@ sets its own:
 rt, err := messaging.New(cfg, broker, postgres.Outbox(), postgres.Inbox(), shutdown, logger,
 	messaging.OnFailure(func(ctx context.Context, f messaging.Failure) {
 		failures.WithLabelValues(string(f.Kind)).Inc()
-	}))
+	}, nil))
 ```
 
 A hook must not block for long: the relay and the consumer wait on it.

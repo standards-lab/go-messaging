@@ -38,9 +38,9 @@ func Timeout(d time.Duration) RelayOption {
 // than at its next start. Once d runs out, the pass claims no further row.
 // A row already claimed settles on its own deadlines, as every row does: its
 // handler's [Timeout] and its transaction's twice that. The reactor's
-// [reactor.CancelAfter] cancels the handler first if it runs out sooner, so
-// set d below it. The default, 0, makes no last pass. d must not be
-// negative.
+// [reactor.Options.CancelAfter] cancels the handler first if it runs out
+// sooner, so set d below it. The default, 0, makes no last pass. d must not
+// be negative.
 func Drain(d time.Duration) RelayOption {
 	return func(r *Relay) { r.drain = d }
 }
@@ -235,7 +235,7 @@ func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled
 	// database or a handler that ignores its deadline.
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*r.timeout)
 	defer cancel()
-	tx, err := r.db.Begin(settle)
+	tx, err := r.db.Begin(settle, nil)
 	if err != nil {
 		return false, fmt.Errorf("outbox: relay: begin: %w", err)
 	}

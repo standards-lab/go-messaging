@@ -138,7 +138,7 @@ func TestSinkWritesEachEventInTheCommandsTransaction(t *testing.T) {
 	sink := newOutbox(t).Sink()
 	_, err := sqlate.Transact(context.Background(), db, func(tx *sqlate.Tx) (struct{}, error) {
 		return struct{}{}, sink.Write(context.Background(), tx, testEvent("a"), testEvent("b"))
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestSinkFailsOnAnEventAlreadyThere(t *testing.T) {
 	sink := newOutbox(t).Sink()
 	_, err := sqlate.Transact(context.Background(), db, func(tx *sqlate.Tx) (struct{}, error) {
 		return struct{}{}, sink.Write(context.Background(), tx, testEvent("a"), testEvent("b"), testEvent("c"))
-	})
+	}, nil)
 	if !errors.Is(err, duplicate) {
 		t.Fatalf("Write = %v, want the engine's duplicate error", err)
 	}
@@ -184,7 +184,7 @@ func TestSinkRejectsAnInvalidEvent(t *testing.T) {
 	bad.Type = ""
 	_, err := sqlate.Transact(context.Background(), db, func(tx *sqlate.Tx) (struct{}, error) {
 		return struct{}{}, sink.Write(context.Background(), tx, bad)
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("Write accepted an event without a type")
 	}

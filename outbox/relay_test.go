@@ -473,7 +473,9 @@ func TestReportGetsTheReceivingContext(t *testing.T) {
 	go func() { done <- r.Receive(ctx, pub.publish) }()
 	waitFor(t, "the pass to end", func() bool { return rec.Pending() == 0 && len(rec.Ops()) == 7 })
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("Receive = %v, want nil", err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if len(got) != 1 || got[0] != "receiving" {
@@ -502,7 +504,9 @@ func TestReadyFromTheStartOfReceive(t *testing.T) {
 	go func() { done <- r.Receive(ctx, pub.publish) }()
 	waitFor(t, "the relay to be ready", r.Ready)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("Receive = %v, want nil", err)
+	}
 	if r.Ready() {
 		t.Error("ready after Receive returned")
 	}

@@ -1,6 +1,6 @@
 [tools]
-go = "1.27.2"
-golangci-lint = "2.14.0"
+go = "1.27.4"
+golangci-lint = "2.15.0"
 jq = "1.8.2"
 # crane lists an image's tags for currency's image scan.
 "aqua:google/go-containerregistry" = "0.22.1"

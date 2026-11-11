@@ -63,7 +63,7 @@ func New(cfg Config, broker Broker, outboxEngine outbox.Engine, inboxEngine inbo
 		return nil, fmt.Errorf("messaging: %w", err)
 	}
 	r := &Runtime{
-		Recorder: event.NewRecorder(ob.Sink(), cfg.Source),
+		Recorder: event.NewRecorder(ob.Sink(), cfg.Source, event.Options{}),
 		broker:   broker,
 		outbox:   ob,
 		inbox:    in,
@@ -106,7 +106,7 @@ func (r *Runtime) Relay(db sqlate.Beginner) *reactor.Reactor[event.Event] {
 		r.logger.InfoContext(ctx, "event published", "type", e.Type, "event", e.ID, "subject", e.Subject)
 		return nil
 	}
-	return reactor.New(src, publish, reactor.CancelWithin(r.shutdown))
+	return reactor.New(src, publish, reactor.Options{CancelAfter: reactor.CancelWithin(r.shutdown)})
 }
 
 // Claim records, in a command's transaction, that the consumer is handling
@@ -193,7 +193,7 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 		}
 		return err
 	}
-	return reactor.New(src, handle, reactor.CancelWithin(r.shutdown)), nil
+	return reactor.New(src, handle, reactor.Options{CancelAfter: reactor.CancelWithin(r.shutdown)}), nil
 }
 
 // share holds the runtime's gate shared for the delivery whose handler

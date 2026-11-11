@@ -44,7 +44,7 @@ var placed = event.Event{ID: "e1", Source: "test/orders", Type: "order.placed"}
 func claimIn(t *testing.T, in *inbox.Inbox, db *sqlate.DB, consumer string, rollback bool) (bool, error) {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := db.Begin(ctx)
+	tx, err := db.Begin(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
