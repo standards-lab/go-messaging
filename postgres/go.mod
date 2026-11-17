@@ -21,9 +21,3 @@ require (
 )
 
 tool github.com/standards-lab/sqlate/sqlint/cmd/sqlint
-
-// Temporary: sqlate/postgres v0.8.0, pgtest's new home, is not yet tagged,
-// so the integration suite reaches it in the sibling sqlate checkout. When
-// v0.8.0 is tagged, SHIP removes this replace and the requirement above
-// resolves from the proxy.
-replace github.com/standards-lab/sqlate/postgres => ../../sqlate/postgres
