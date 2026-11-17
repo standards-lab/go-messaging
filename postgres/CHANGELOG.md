@@ -7,6 +7,21 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- The module requires `sqlate/postgres` v0.8.0, which adds `pgtest`, this module's former
+  helper's new home; the dialect's own API is unchanged.
+
+### Removed
+
+- **Breaking:** The `pgtest` package. A test makes its throwaway database with
+  `github.com/standards-lab/sqlate/postgres/pgtest` instead, which takes the name of the
+  environment variable holding the admin DSN rather than the DSN itself: `Create(t, env, prefix)`
+  in place of `Scratch`, `DSN`, and `Pool`, its `Database` carrying the pool and the database's
+  DSN; `Create(t, "MESSAGING_DSN", "messaging").Session()` in place of `Open`; and
+  `Migrated(t, env, prefix, sets...)` for a database with migration sets, such as `Migrations`'s,
+  applied.
+
 ## [v0.3.0] - 2026-11-11
 
 ### Changed

@@ -11,9 +11,9 @@ import (
 	"github.com/standards-lab/go-messaging/inbox"
 	"github.com/standards-lab/go-messaging/outbox"
 	"github.com/standards-lab/go-messaging/postgres"
-	"github.com/standards-lab/go-messaging/postgres/pgtest"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/migrate"
+	"github.com/standards-lab/sqlate/postgres/pgtest"
 )
 
 // ob and in are the outbox and the inbox on the Postgres engine, which every
@@ -30,23 +30,38 @@ func must[T any](v T, err error) T {
 	return v
 }
 
+// env names the server's admin DSN, on which each test creates and drops
+// its own database, and prefix starts each database's name.
+const (
+	env    = "MESSAGING_DSN"
+	prefix = "messaging"
+)
+
+// bare returns a throwaway database with nothing applied.
+func bare(t *testing.T) *sqlate.DB {
+	t.Helper()
+	return pgtest.Create(t, env, prefix).Session()
+}
+
 // migrated returns a throwaway database with the messaging set applied.
 func migrated(t *testing.T) *sqlate.DB {
 	t.Helper()
-	db := pgtest.Open(t)
-	if err := migrator(t, db).Up(t.Context()); err != nil {
-		t.Fatalf("migrate up: %v", err)
+	return pgtest.Migrated(t, env, prefix, messagingSet(t)).Session()
+}
+
+// messagingSet returns the module's messaging migration set.
+func messagingSet(t *testing.T) migrate.Set {
+	t.Helper()
+	s, err := postgres.Migrations()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return db
+	return s
 }
 
 func migrator(t *testing.T, db *sqlate.DB) *migrate.Migrator {
 	t.Helper()
-	set, err := postgres.Migrations()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := migrate.New(db, []migrate.Set{set}, migrate.Options{})
+	m, err := migrate.New(db, []migrate.Set{messagingSet(t)}, migrate.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +155,7 @@ func valid(t *testing.T, db *sqlate.DB, name string) bool {
 }
 
 func TestMigrationsUpAndDown(t *testing.T) {
-	db := pgtest.Open(t)
+	db := bare(t)
 	m := migrator(t, db)
 	if err := m.Up(t.Context()); err != nil {
 		t.Fatalf("up: %v", err)
@@ -195,8 +210,7 @@ func TestMigrationsUpAndDown(t *testing.T) {
 }
 
 func TestVerifyNeedsTheMigratedSchema(t *testing.T) {
-	bare := pgtest.Open(t)
-	if err := postgres.Verify(t.Context(), bare); err == nil {
+	if err := postgres.Verify(t.Context(), bare(t)); err == nil {
 		t.Fatal("Verify passed on a database without the messaging set")
 	}
 	if err := postgres.Verify(t.Context(), migrated(t)); err != nil {
