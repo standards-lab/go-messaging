@@ -7,6 +7,23 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-11-17
+
+### Changed
+
+- The module requires `sqlate/postgres` v0.8.0, whose new `pgtest` package replaces this
+  module's own; the dialect's API is unchanged.
+
+### Removed
+
+- **Breaking:** The `pgtest` package. A test makes its throwaway database with
+  `github.com/standards-lab/sqlate/postgres/pgtest` instead, which takes the name of the
+  environment variable holding the admin DSN rather than the DSN itself: `Create(t, env, prefix)`
+  in place of `Scratch`, `DSN`, and `Pool`, its `Database` carrying the pool and the database's
+  DSN; `Create(t, "MESSAGING_DSN", "messaging").Session()` in place of `Open`; and
+  `Migrated(t, env, prefix, sets...)` for a database with migration sets, such as `Migrations`'s,
+  applied.
+
 ## [v0.3.0] - 2026-11-11
 
 ### Changed
@@ -69,7 +86,8 @@ changelog covers this sub-module only; the base module keeps its own.
 - The module requires `go-messaging` v0.1.0, `sqlate` and `sqlate/postgres` v0.5.0, and pgx
   v5.11.0, with the `sqlate/sqlint` tool at v0.3.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.3.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.4.0...HEAD
+[v0.4.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.3.0...postgres/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.2.0...postgres/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.1.0...postgres/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/postgres/v0.1.0

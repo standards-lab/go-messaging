@@ -64,6 +64,7 @@
 // on the calling process's clock. Neither is part of the outbox's or the
 // inbox's Engine.
 //
-// The pgtest package gives each test a throwaway database, for this
-// module's integration suite and a consumer's own.
+// A test that needs a throwaway database with the messaging set applied
+// makes one with github.com/standards-lab/sqlate/postgres/pgtest, passing
+// [Migrations] to its Migrated, as this module's integration suite does.
 package postgres

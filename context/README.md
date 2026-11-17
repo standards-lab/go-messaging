@@ -28,8 +28,8 @@ written detail when a session is about to build it.
 - **Inbox**: `inbox/doc.go`.
 - **Memory provider** and the conformance suite: `memory/doc.go`, `messagingtest/doc.go`.
 - **Postgres engine**, its `messaging` migration set, and the outbox and inbox retentions:
-  `postgres/doc.go` and the README's "Retention" section, with the scratch-database helper in
-  `postgres/pgtest/doc.go`.
+  `postgres/doc.go` and the README's "Retention" section. Its integration suite makes each test's
+  database through `github.com/standards-lab/sqlate/postgres/pgtest`.
 - **NATS provider**, with stream ownership: `nats/doc.go`, with the scratch-stream helper in
   `nats/natstest/doc.go`.
 - **CI and release**: `.github/workflows/`; the README's "Releases" section.

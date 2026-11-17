@@ -33,8 +33,7 @@ its provider's.
 - `messagingtest` is the conformance suite, `Run`, every provider passes.
 - `postgres` (sub-module) is the PostgreSQL engine: the outbox's and inbox's statements, the
   `messaging` migration set, `Verify`, `Pending`, and the retentions, `OutboxRetention` and
-  `InboxRetention`, that delete aged published and handled rows a budget at a time. Its `pgtest`
-  package gives each test a throwaway database.
+  `InboxRetention`, that delete aged published and handled rows a budget at a time.
 - `nats` (sub-module) is the NATS JetStream provider: the `Broker` on one stream, its `Config`
   block with the stream's owner switch, and the durable pull consumers its sources bind. Its
   `natstest` package gives each test its own stream.

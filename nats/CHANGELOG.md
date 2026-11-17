@@ -7,6 +7,10 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- nats.go is v1.56.0.
+
 ## [v0.3.0] - 2026-11-11
 
 ### Changed
