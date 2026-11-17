@@ -11,8 +11,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ### Changed
 
-- The module requires `sqlate/postgres` v0.8.0, which adds `pgtest`, this module's former
-  helper's new home; the dialect's own API is unchanged.
+- The module requires `sqlate/postgres` v0.8.0, whose new `pgtest` package replaces this
+  module's own; the dialect's API is unchanged.
 
 ### Removed
 
