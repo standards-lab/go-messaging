@@ -1,10 +1,5 @@
-# The harness's PostgreSQL: the server the integration suite connects to
-# through MESSAGING_DSN, creating and dropping a database per test. This
-# FROM line is PostgreSQL's one pin. Its user, password, and database are
-# the development values MESSAGING_DSN names, not secrets. It is healthy
-# once the server accepts TCP connections to the app database: the first
-# start's initialization runs a temporary server on the socket alone, which
-# would report ready before the real server starts.
+# The harness's PostgreSQL, for the postgres module's integration suite.
+# See docs/internals.md
 FROM postgres:19.0-alpine
 
 ENV POSTGRES_USER=app \

@@ -103,3 +103,47 @@ happen. A provider may create a StartNew consumer as late as the source's first 
 StartNew case publishes its later events only once the member is ready. The drain case's AckWait
 is short, so a lost acknowledgement would redeliver within the watch, which runs to twice AckWait
 past the handler's start, leaving a provider room for its own margin.
+
+## Development configuration
+
+### Lint configuration
+
+The base module's `.golangci.yml` enables depguard alongside testpackage and nolintlint; the
+postgres and nats sub-modules carry their own configuration, without depguard, and with the
+integration build tag so the check lints each integration suite. A depguard entry matches by
+prefix unless it ends in `$`, so each allow entry is anchored, as exactly a path or a path under
+it. The longest match wins, so the deny entries keep the sub-modules out of the base despite the
+module's own allow entry.
+
+`postgres/sqlint.toml` runs from the postgres module's directory. The engine names the native
+forms a standard-tier file may not use, and the sources name the pattern catalogs the statements'
+includes resolve against: sqlate's own. The base module holds no SQL. The outbox's and the inbox's
+statements are named for their operation, keep the delimiter out of comments and literals, and use
+no native form in a standard-tier file; a native file is exempt by its tier and carries its port
+note. The migrations have no native-forms check: the DDL is PostgreSQL's, the only engine's.
+
+### The compose harness
+
+`compose.yml` is test-only. Each service builds from `compose/<service>/Dockerfile`, which pins
+its image on its FROM line, its one pin, and carries its configuration and health check. Each
+keeps its data in tmpfs, so every start begins empty.
+
+PostgreSQL is the server the integration suite connects to through `MESSAGING_DSN`, creating and
+dropping a database per test. Its user, password, and database are the development values
+`MESSAGING_DSN` names, not secrets. It is healthy once the server accepts TCP connections to the
+app database: the first start's initialization runs a temporary server on the socket alone, which
+would report ready before the real server starts.
+
+NATS is the JetStream server the nats module's integration suite connects to through
+`MESSAGING_NATS_URL`, creating and deleting a stream per test. It runs JetStream with its store in
+`/data`, which compose mounts as tmpfs, and is healthy once JetStream is enabled, read from the
+unpublished monitoring port.
+
+### currency
+
+A tool's module is an indirect requirement, so `scripts/currency.sh` scans it apart from the
+direct requirements; go list's standard error, which carries the warning for a module with no tool
+directive and any download's progress, is shown only when go list fails. An image tag counts only
+when it has at least one dot and the pin's variant suffix (18.6-alpine -> -alpine): some images
+also publish bare build numbers that would sort above every release. A compose service built from
+`compose/<service>/Dockerfile` is pinned on its FROM line, not an image: line.

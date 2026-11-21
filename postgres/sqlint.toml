@@ -1,12 +1,6 @@
 # sqlint: the postgres module's SQL conventions, run by `mise run check`
-# from this directory. The engine names the native forms a standard-tier
-# file may not use, and the sources name the pattern catalogs the
-# statements' includes resolve against: sqlate's own. The base module holds
-# no SQL. The outbox's and the inbox's statements are named for their
-# operation, keep the delimiter out of comments and literals, and use no
-# native form in a standard-tier file; a native file is exempt by its tier
-# and carries its port note. The migrations have no native-forms check: the
-# DDL is PostgreSQL's, the only engine's.
+# from this directory.
+# See docs/internals.md
 engine = "github.com/standards-lab/sqlate/postgres"
 
 [sources]

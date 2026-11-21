@@ -1,6 +1,6 @@
-# golangci-lint v2 configuration for the postgres sub-module, run by `mise run check`: the base
-# module's configuration without depguard, with the integration build tag so the check lints the
-# integration suite.
+# golangci-lint v2 configuration for the postgres sub-module, run by `mise run check`: the standard
+# set plus testpackage and nolintlint, with the integration build tag.
+# See docs/internals.md
 # See architecture/standards/go-elemental/principles/tests-and-docs.md
 # See architecture/principles/comments.md
 version: "2"
