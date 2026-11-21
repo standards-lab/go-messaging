@@ -1,6 +1,8 @@
 # golangci-lint v2 configuration for the base module, run by `mise run check`: the standard set
 # plus depguard, testpackage, and nolintlint. The postgres and nats sub-modules carry their own,
-# without depguard.
+# without depguard. A depguard entry matches by prefix unless it ends in `$`, so each allow entry
+# is anchored, as exactly a path or a path under it; the longest match wins, so the deny entries
+# keep the sub-modules out of the base despite the module's own allow entry.
 # See architecture/standards/go-elemental/principles/dependencies.md
 # See architecture/standards/go-elemental/principles/tests-and-docs.md
 # See architecture/principles/comments.md

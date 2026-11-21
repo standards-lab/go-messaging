@@ -3,7 +3,7 @@
 How a service wires and runs go-messaging. Each package's `doc.go` and the
 [README](../README.md) state what the packages promise; this page shows them in use.
 
-### Wiring the runtime
+## Wiring the runtime
 
 A service builds one `Runtime` with a `messaging.Setup`: its messaging `Config`, a broker, and its
 engine's statements. The base module imports neither: the composition root hands them over.
@@ -43,7 +43,7 @@ _, err := sqlate.Transact(ctx, db, rt.Recorder.Emit(ctx, func(tx *sqlate.Tx, q *
 }), nil)
 ```
 
-### The NATS broker
+## The NATS broker
 
 The `nats` sub-module's `Broker` publishes to one JetStream stream and subscribes durable pull
 consumers on it. Its `Config` is the service's `nats` block, finalized as the messaging block is:
@@ -81,7 +81,7 @@ The broker is a lifecycle node of the graph, started before every reactor on it;
 reaches it before `Start` fails with `nats.ErrNotStarted`. `broker.Conn()` is the native
 connection, for request and reply in the composition root.
 
-### The relay and consumers as graph nodes
+## The relay and consumers as graph nodes
 
 The runtime registers nothing. The composition root makes the broker and each reactor a node of
 its go-core graph, and the coordinator starts, drains, and watches them from their methods. In
@@ -122,7 +122,7 @@ The handler's return is the delivery's outcome: nil acknowledges it, an error re
 `RetryDelay`, and an error wrapped with `event.Permanent` terminates it. Data that does not decode
 is refused permanently.
 
-### The error hook
+## The error hook
 
 The failures the relay and the consumers survive, which no caller sees as an error, go to the
 runtime's hook, each as a `messaging.Failure` whose `Kind` names what failed: `relay` (a pass
@@ -145,7 +145,7 @@ rt, err := messaging.Setup{
 
 A hook must not block for long: the relay and the consumer wait on it.
 
-### Quarantine
+## Quarantine
 
 An outbox row that can never be published, one whose event does not decode or whose publish
 failed with an `event.Permanent` error, is quarantined in its own transaction, so it does not
@@ -172,7 +172,7 @@ SET quarantined_at = NULL, quarantine_reason = NULL
 WHERE seq = $1;
 ```
 
-### Retention
+## Retention
 
 The relay never deletes a published row and the inbox never deletes a handled one, so both
 tables grow until the service reclaims them. `postgres.OutboxRetention` and
@@ -192,7 +192,7 @@ outlast every redelivery the broker can make. A pass runs on a pool and needs no
 and `Pass` has the shape a sweeper's reclaimer takes, so a sweeper that bounds each pass by a
 budget drives it. Migrations 0002 and 0003 index both tables for their retentions.
 
-### MaxDeliver exhaustion
+## MaxDeliver exhaustion
 
 A subscription's `MaxDeliver` bounds the deliveries of one event; 0 is unlimited. A handler reads
 which delivery it is on with `messaging.Attempt(ctx)`. When the handler fails, with an error not
@@ -203,7 +203,7 @@ Exhaustion is seen only from the handler's error. An event whose last delivery o
 `AckWait`, with the handler returning nil or returning late, is given up unreported. Size
 `AckWait` above the handler's worst case where an unreported loss matters.
 
-### The quiesce gate
+## The quiesce gate
 
 `Setup.Gate` gives the runtime a gate its reactors hold shared, such as go-core's
 `reactor.Gate`, so an operation that holds it exclusively, a restore or a migration, runs with

@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 # currency reports every dependency, toolchain, and pin that trails its latest
 # release, one line each, and exits non-zero when it reports any. It reads the
-# network and writes nothing. Run it through `mise run currency`.
+# network and writes nothing. Run it through `mise run currency`. The actions it
+# checks are those of the project root's workflows and, when the repository nests
+# the project in a subdirectory, of the git top-level's.
+#
+# Each scan captures its command's output in a variable before reading it, so
+# under set -e a scan command that fails (a go list missing a go.sum entry)
+# fails currency instead of reporting nothing.
+#
+# A tool's module is an indirect requirement, so it is scanned apart from the
+# direct requirements; go list's standard error, which carries the warning for a
+# module with no tool directive and any download's progress, is shown only when
+# go list fails. An image tag counts only when it has at least one dot and the
+# pin's variant suffix (18.6-alpine -> -alpine): some images also publish bare
+# build numbers that would sort above every release. A compose service built
+# from compose/<service>/Dockerfile is pinned on its FROM line, not an image:
+# line.
 # See architecture/principles/rolling-currency.md
 set -euo pipefail
 cd "$MISE_PROJECT_ROOT"
@@ -22,7 +37,7 @@ report_each_line() {
 	done <<<"$lines"
 }
 
-matches_in_existing_files() {
+matches() {
 	local pattern=$1 file
 	local files=()
 	shift
@@ -33,7 +48,7 @@ matches_in_existing_files() {
 	grep -ho "$pattern" "${files[@]}" || [ $? -eq 1 ]
 }
 
-tool_modules_showing_stderr_only_on_failure() {
+tool_modules() {
 	local out err
 	err=$(mktemp)
 	if ! out=$(go list -f '{{.Module.Path}}' tool 2>"$err"); then
@@ -54,7 +69,7 @@ report_outdated_direct_requirements() {
 
 report_outdated_indirect_tool_modules() {
 	local mod=$1 tools updates
-	tools=$(cd "$mod" && tool_modules_showing_stderr_only_on_failure)
+	tools=$(cd "$mod" && tool_modules)
 	if [ -n "$tools" ]; then
 		updates=$(cd "$mod" && go list -m -u -f \
 			'{{if and (not .Main) .Indirect .Update}}{{.Path}} {{.Version}} -> {{.Update.Version}}{{end}}' $tools)
@@ -85,7 +100,7 @@ report_outdated_mise_tools() {
 	report_each_line "mise.toml: " "$outdated"
 }
 
-collect_workflows_of_project_and_git_toplevel() {
+collect_workflows() {
 	local root top
 	root=$(pwd -P)
 	top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
@@ -95,7 +110,7 @@ collect_workflows_of_project_and_git_toplevel() {
 
 report_outdated_actions() {
 	local actions uses action pin repo latest
-	actions=$(matches_in_existing_files 'uses: *[^ ]*@[^ ]*' "${workflows[@]}" | sed 's/uses: *//' | sort -u)
+	actions=$(matches 'uses: *[^ ]*@[^ ]*' "${workflows[@]}" | sed 's/uses: *//' | sort -u)
 	for uses in $actions; do
 		action=${uses%@*}
 		pin=${uses#*@}
@@ -105,7 +120,7 @@ report_outdated_actions() {
 	done
 }
 
-latest_dotted_tag_with_pin_suffix() {
+latest_tag() {
 	local image=$1 pin=$2 suffix pattern latest
 	suffix=${pin#"${pin%%[!0-9.]*}"}
 	pattern="^[0-9]+(\.[0-9]+)+${suffix//./\\.}\$"
@@ -115,12 +130,12 @@ latest_dotted_tag_with_pin_suffix() {
 
 report_outdated_image_lines() {
 	local images ref image pin latest
-	images=$(matches_in_existing_files '^ *image: *[^ ]*' compose.yml compose/*.yml "${workflows[@]}" |
+	images=$(matches '^ *image: *[^ ]*' compose.yml compose/*.yml "${workflows[@]}" |
 		sed 's/^ *image: *//' | tr -d "\"'" | sort -u)
 	for ref in $images; do
 		image=${ref%:*}
 		pin=${ref##*:}
-		latest=$(latest_dotted_tag_with_pin_suffix "$image" "$pin")
+		latest=$(latest_tag "$image" "$pin")
 		[ "$pin" = "$latest" ] || report "images: $image $pin -> $latest"
 	done
 }
@@ -132,14 +147,14 @@ report_outdated_dockerfile_froms() {
 		ref=$(sed -n 's/^FROM  *\([^ ]*\).*/\1/p' "$dockerfile" | head -n1)
 		image=${ref%:*}
 		pin=${ref##*:}
-		latest=$(latest_dotted_tag_with_pin_suffix "$image" "$pin")
+		latest=$(latest_tag "$image" "$pin")
 		[ "$pin" = "$latest" ] || report "$dockerfile: $image $pin -> $latest"
 	done
 }
 
 report_outdated_modules
 report_outdated_mise_tools
-collect_workflows_of_project_and_git_toplevel
+collect_workflows
 report_outdated_actions
 report_outdated_image_lines
 report_outdated_dockerfile_froms
