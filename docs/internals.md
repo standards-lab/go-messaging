@@ -51,10 +51,10 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
   so the consumer's configuration shares no array with the subscription.
 - **Pulls.** Each pull is bounded, so a pull the server holds for a member that has stopped
   expires soon, and its deadline sets the pull's expiry on the server. An empty pull is a healthy
-  one while the connection is up. Most failures pass, such as a reconnect or a leader election.
-  While the connection is down the client buffers the pull request and nothing answers, so the
-  pull ends as an empty one would; that is a failure too, named for the connection's state. A
-  deleted consumer or stream does not pass: its pulls fail with no responders, so after a few
+  one while the connection is up. Most failures are transient, such as a reconnect or a leader
+  election. While the connection is down the client buffers the pull request and nothing answers,
+  so the pull ends as an empty one would; that is a failure too, named for the connection's state.
+  A deleted consumer or stream is not transient: its pulls fail with no responders, so after a few
   failures the member asks the server whether its consumer still exists, which it can do only
   while connected.
 - **Deliveries.** The attempt comes from the server's delivered count, so a message whose metadata

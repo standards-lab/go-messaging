@@ -9,9 +9,9 @@ provider, and a memory provider serves tests. The base module depends on the sta
 go-core, and sqlate with its `query` package, the adjacent library the outbox's and inbox's
 engine contract builds on; the postgres engine and the NATS provider are sub-modules.
 
-The README and each package's `doc.go` document this repository. The
+The README, the pages under `docs/`, and each package's `doc.go` document this repository. The
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md) standard states the principles it follows.
-This context records only working knowledge the code and the README do not express.
+This context records only working knowledge the code and its documentation do not express.
 
 The design is the coordinator's `standards-lab/context/messaging.md`. The source is
 spike-messaging's `messaging` modules
@@ -31,10 +31,10 @@ written detail when a session is about to build it.
 - **Memory provider** (built): the memory provider and the conformance suite
   ([memory/doc.go](../memory/doc.go), [messagingtest/doc.go](../messagingtest/doc.go)).
 - **Postgres engine** (built): the engine, its `messaging` migration set, and the outbox and
-  inbox retentions: [postgres/doc.go](../postgres/doc.go) and the "Retention" section of
-  [docs/usage.md](../docs/usage.md#retention). Its integration suite makes each test's database
-  through `github.com/standards-lab/sqlate/postgres/pgtest`.
-- **NATS provider** (built): the provider, with stream ownership: [nats/doc.go](../nats/doc.go),
-  with the scratch-stream helper in [nats/natstest/doc.go](../nats/natstest/doc.go).
-- **CI and release** (built): [.github/workflows/](../.github/workflows/); the README's
-  "Releases" section ([README.md](../README.md#releases)).
+  inbox retentions ([postgres/doc.go](../postgres/doc.go) and
+  [docs/usage.md, "Retention"](../docs/usage.md#retention)). Its integration suite makes each
+  test's database through `github.com/standards-lab/sqlate/postgres/pgtest`.
+- **NATS provider** (built): the provider, with stream ownership ([nats/doc.go](../nats/doc.go)),
+  and the scratch-stream helper ([nats/natstest/doc.go](../nats/natstest/doc.go)).
+- **CI and release** (built): [.github/workflows/](../.github/workflows/) and the README's
+  [Releases](../README.md#releases) section.
