@@ -11,3 +11,4 @@ The judgement calls the standards-reviewer applies to go-messaging, beyond what 
 - `architecture/standards/go-elemental/principles/construction-and-execution.md`: `messaging.Setup`, whose `Build` panics naming a nil `Broker` or `Logger`; `outbox.RelayOptions`, the one options value `Outbox.Relay` takes; and every new exported function and constructor.
 - `architecture/principles/service-tiers.md`: the standard-tier broker contract and the providers beneath it.
 - `architecture/principles/context-architecture.md`: the README and `doc.go` are the homes.
+- `architecture/principles/comments.md`: every comment is one of the five kinds, in source, tests, scripts, and every configuration file (TOML, YAML, `.gitignore`, Dockerfiles, compose), not just source; a data file's header is its package documentation, and a sqlate SQL file's header is also its template metadata.
