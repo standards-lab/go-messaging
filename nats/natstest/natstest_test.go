@@ -6,9 +6,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats/natstest"
 )
 
-// fatalTB is a testing.TB whose Fatal is recorded rather than ending the
-// test, so a test can watch Open fail one. Open uses no other method that
-// fails or ends a test.
 type fatalTB struct {
 	testing.TB
 	fatal []any
@@ -16,8 +13,6 @@ type fatalTB struct {
 
 func (f *fatalTB) Fatal(args ...any) { f.fatal = append(f.fatal, args...) }
 
-// Open fails the test when MESSAGING_NATS_URL is unset, and returns it when
-// it is set.
 func TestOpen(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
 		t.Setenv("MESSAGING_NATS_URL", "")

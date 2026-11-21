@@ -1,30 +1,24 @@
-# golangci-lint v2 configuration for the base module, run by `mise run check`.
-# golangci-lint takes the configuration nearest the directory it runs in, so
-# the postgres and nats sub-modules carry their own, without depguard.
+# golangci-lint v2 configuration for the base module, run by `mise run check`: the standard set
+# plus depguard, testpackage, and nolintlint.
+# See docs/internals.md
+# See architecture/standards/go-elemental/principles/dependencies.md
+# See architecture/standards/go-elemental/principles/tests-and-docs.md
+# See architecture/principles/comments.md
 version: "2"
 
 linters:
-  # The standard set (errcheck, govet, ineffassign, staticcheck, unused),
-  # plus depguard, which holds the base module to its allowed imports, and
-  # testpackage, which keeps tests black-box. Its skip regexp is narrowed
-  # to export_test.go, the one white-box file allowed, which only exports a
-  # clock or probe hook the black-box tests use.
   default: standard
   enable:
     - depguard
+    - nolintlint
     - testpackage
   settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     testpackage:
       skip-regexp: export_test\.go
     depguard:
-      # The base imports no broker and no engine: the standard library,
-      # go-core, sqlate's statement packages, and its own packages. Allow
-      # entries match by prefix unless they end in `$`, so each is anchored:
-      # go-core as the exact module path or a path under it (not a sibling
-      # like go-core-extra), sqlate and sqlate/query as exactly themselves
-      # (not sqlate/postgres), and the module as itself or a package under
-      # it. The longest match wins, so the deny entries keep the postgres and
-      # nats sub-modules out of the base despite the module's prefix.
       rules:
         production:
           list-mode: strict
@@ -44,8 +38,6 @@ linters:
               desc: the base imports no engine; the postgres sub-module depends on the base
             - pkg: github.com/standards-lab/go-messaging/nats
               desc: the base imports no broker; the nats sub-module depends on the base
-        # Tests may also import sqlate's sqltest, which checks the
-        # statements the packages compile.
         tests:
           list-mode: strict
           files:

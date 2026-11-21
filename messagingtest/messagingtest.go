@@ -14,11 +14,9 @@ import (
 	"github.com/standards-lab/go-messaging"
 )
 
-// failsafe bounds every wait for something that should happen, so a broken
-// provider fails the case instead of hanging it.
+// See docs/internals.md
 const failsafe = 5 * time.Second
 
-// quiet is how long a case watches for something that must not happen.
 const quiet = 250 * time.Millisecond
 
 // Run runs the conformance suite, each case as a subtest on a broker from
@@ -72,8 +70,6 @@ func publish(t *testing.T, b messaging.Broker, es ...event.Event) {
 	}
 }
 
-// member subscribes under sub, starts a reactor on the source, and waits
-// until it is receiving. The cleanup shuts it down if the case has not.
 func member(t *testing.T, b messaging.Broker, sub messaging.Subscription, fn reactor.Func[event.Event]) *reactor.Reactor[event.Event] {
 	t.Helper()
 	src, err := b.Subscribe(sub, nil)
@@ -106,11 +102,10 @@ func eventually(t *testing.T, cond func() bool, what string) {
 	}
 }
 
-// deliveries records what each handler received.
 type deliveries struct {
 	mu  sync.Mutex
 	ids []string
-	by  map[string]string // id to the member that handled it last
+	by  map[string]string
 }
 
 func (d *deliveries) add(who string, e event.Event) {
@@ -143,7 +138,6 @@ func (d *deliveries) has(id string) func() bool {
 	return func() bool { return d.count(id) > 0 }
 }
 
-// record returns a handler that records each event and acknowledges it.
 func (d *deliveries) record(who string) reactor.Func[event.Event] {
 	return func(_ context.Context, e event.Event) error {
 		d.add(who, e)
@@ -189,8 +183,6 @@ func testTypeFilter(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A filter of one type, the form a provider may configure differently from
-// several, admits that type alone.
 func testSingleTypeFilter(t *testing.T, b messaging.Broker) {
 	var d deliveries
 	member(t, b, messaging.Subscription{Name: "single", Types: []string{"lab.want"}}, d.record("m"))
@@ -201,8 +193,6 @@ func testSingleTypeFilter(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A new Name under StartAll, the zero value, starts at the beginning of the
-// stream, so events published before anything subscribed still reach it.
 func testStartsAtStreamBeginning(t *testing.T, b messaging.Broker) {
 	publish(t, b, ev("early-1", "t"), ev("early-2", "t"))
 	var d deliveries
@@ -214,10 +204,6 @@ func testStartsAtStreamBeginning(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A new Name under StartNew receives only the events published after its
-// consumer is created. A provider may create it as late as the source's
-// first Receive, so the case publishes the later events only once the member
-// is ready, which is after that Receive has created the consumer.
 func testStartNewSkipsEarlier(t *testing.T, b messaging.Broker) {
 	publish(t, b, ev("early-1", "t"), ev("early-2", "t"))
 	var d deliveries
@@ -336,13 +322,12 @@ func testMaxDeliverBounds(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// Deliveries that expire count toward MaxDeliver like those that fail.
 func testMaxDeliverBoundsExpiry(t *testing.T, b messaging.Broker) {
 	var d deliveries
 	member(t, b, messaging.Subscription{Name: "overrun", MaxDeliver: 2, AckWait: 50 * time.Millisecond}, func(ctx context.Context, e event.Event) error {
 		d.add("m", e)
 		<-ctx.Done()
-		return nil // always late, so ignored
+		return nil
 	})
 	publish(t, b, ev("o", "t"))
 	eventually(t, func() bool { return d.count("o") >= 2 }, "two deliveries")
@@ -377,7 +362,7 @@ func testAckWaitRedelivers(t *testing.T, b messaging.Broker) {
 		mu.Lock()
 		attempts[n] = attempt{ok, err}
 		mu.Unlock()
-		return nil // late on the first attempt, so ignored
+		return nil
 	})
 	publish(t, b, ev("s", "t"))
 	eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(attempts) >= 2 }, "the redelivery after AckWait")
@@ -398,9 +383,6 @@ func testAckWaitRedelivers(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A durable resumes where it left off under either start position: the
-// start position places only a new consumer, so a StartNew durable still
-// receives what was published while it had no member.
 func testDurableResumes(t *testing.T, b messaging.Broker) {
 	for _, c := range []struct {
 		name  string
@@ -426,9 +408,6 @@ func testDurableResumes(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// The subscription's AckWait is short, so a lost acknowledgement would
-// redeliver the event within the case's watch, which runs to twice AckWait
-// past the handler's start, leaving a provider room for its own margin.
 func testDrainKeepsAck(t *testing.T, b messaging.Broker) {
 	const ackWait = 500 * time.Millisecond
 	sub := messaging.Subscription{Name: "drain", AckWait: ackWait, RetryDelay: 10 * time.Millisecond}
@@ -509,8 +488,6 @@ func testPublishRejectsInvalid(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A later subscription under an existing Name binds its consumer: the same
-// configuration binds, and a different one fails at Subscribe or at Receive.
 func testBindingMustMatch(t *testing.T, b messaging.Broker) {
 	sub := messaging.Subscription{Name: "bound", MaxDeliver: 3}
 	var d deliveries
@@ -535,9 +512,6 @@ func testBindingMustMatch(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// Subscriptions whose Types differ only in order and repeats mean the same
-// filter, as [messaging.Subscription.Normalize] gives it, so they bind one
-// consumer and share its work.
 func testBindingNormalizesTypes(t *testing.T, b messaging.Broker) {
 	var d deliveries
 	first := member(t, b, messaging.Subscription{Name: "normal", Types: []string{"b", "a", "a"}}, d.record("1"))
@@ -553,7 +527,6 @@ func testBindingNormalizesTypes(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A type that breaks [messaging.CheckType] is refused at both ends.
 func testTypeRule(t *testing.T, b messaging.Broker) {
 	for _, bad := range []string{"a..b", "a.*", "a.>", "a b"} {
 		if _, err := b.Subscribe(messaging.Subscription{Name: "typed", Types: []string{bad}}, nil); err == nil {
@@ -565,8 +538,6 @@ func testTypeRule(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A repeat of a source and id is accepted and dropped, whatever it carries;
-// a new id, and the same id from another source, still deliver.
 func testDeduplicates(t *testing.T, b messaging.Broker) {
 	var d deliveries
 	got := map[string][]byte{}
@@ -594,7 +565,6 @@ func testDeduplicates(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// attempts records the attempt each delivery's context carried, in order.
 type attempts struct {
 	mu sync.Mutex
 	ns []int
@@ -617,8 +587,6 @@ func (a *attempts) atLeast(n int) func() bool {
 	return func() bool { return len(a.seen()) >= n }
 }
 
-// The first delivery of an event is attempt 1, so an acknowledged event's
-// only delivery carries 1, whatever came before it on the stream.
 func testAttemptStartsAtOne(t *testing.T, b messaging.Broker) {
 	var a attempts
 	member(t, b, messaging.Subscription{Name: "first"}, func(ctx context.Context, _ event.Event) error {
@@ -632,7 +600,6 @@ func testAttemptStartsAtOne(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A redelivery after the handler's error is the next attempt.
 func testAttemptCountsAfterError(t *testing.T, b messaging.Broker) {
 	var a attempts
 	member(t, b, messaging.Subscription{Name: "after-error", RetryDelay: 10 * time.Millisecond}, func(ctx context.Context, _ event.Event) error {
@@ -649,15 +616,13 @@ func testAttemptCountsAfterError(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// A redelivery after the handler overran AckWait is the next attempt, as
-// one after an error is.
 func testAttemptCountsAfterExpiry(t *testing.T, b messaging.Broker) {
 	var a attempts
 	member(t, b, messaging.Subscription{Name: "after-expiry", AckWait: 100 * time.Millisecond}, func(ctx context.Context, _ event.Event) error {
 		if a.add(ctx) == 1 {
 			<-ctx.Done()
 		}
-		return nil // late on the first attempt, so ignored
+		return nil
 	})
 	publish(t, b, ev("x", "t"))
 	eventually(t, a.atLeast(2), "the redelivery after AckWait")
@@ -667,8 +632,6 @@ func testAttemptCountsAfterExpiry(t *testing.T, b messaging.Broker) {
 	}
 }
 
-// An event bounded by MaxDeliver is delivered on attempts 1 through
-// MaxDeliver, so a handler on attempt MaxDeliver knows it is the last.
 func testAttemptReachesMaxDeliver(t *testing.T, b messaging.Broker) {
 	const maxDeliver = 3
 	var a attempts

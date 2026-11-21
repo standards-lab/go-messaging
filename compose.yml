@@ -1,8 +1,6 @@
 # go-messaging's test-only harness: PostgreSQL for the postgres module's
-# integration suite and NATS with JetStream for the nats module's. Each
-# service builds from compose/<service>/Dockerfile, which pins its image and
-# carries its configuration and health check. Each keeps its data in tmpfs,
-# so every start begins empty.
+# integration suite and NATS with JetStream for the nats module's.
+# See docs/internals.md
 name: go-messaging
 
 include:

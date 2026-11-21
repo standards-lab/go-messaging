@@ -33,8 +33,6 @@ type Engine struct {
 	Quarantine query.Statement
 }
 
-// validate reports every statement the engine leaves undefined or defines
-// with the wrong parameters.
 func (e Engine) validate() error {
 	err := errors.Join(
 		engine.Check("Emit", e.Emit, "source", "id", "header", "data"),

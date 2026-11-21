@@ -16,8 +16,6 @@ import (
 	"github.com/standards-lab/sqlate/postgres/pgtest"
 )
 
-// ob and in are the outbox and the inbox on the Postgres engine, which every
-// test runs.
 var (
 	ob = must(outbox.New(postgres.Outbox()))
 	in = must(inbox.New(postgres.Inbox()))
@@ -30,26 +28,21 @@ func must[T any](v T, err error) T {
 	return v
 }
 
-// env names the server's admin DSN, on which each test creates and drops
-// its own database, and prefix starts each database's name.
 const (
 	env    = "MESSAGING_DSN"
 	prefix = "messaging"
 )
 
-// bare returns a throwaway database with nothing applied.
 func bare(t *testing.T) *sqlate.DB {
 	t.Helper()
 	return pgtest.Create(t, env, prefix).Session()
 }
 
-// migrated returns a throwaway database with the messaging set applied.
 func migrated(t *testing.T) *sqlate.DB {
 	t.Helper()
 	return pgtest.Migrated(t, env, prefix, messagingSet(t)).Session()
 }
 
-// messagingSet returns the module's messaging migration set.
 func messagingSet(t *testing.T) migrate.Set {
 	t.Helper()
 	s, err := postgres.Migrations()
@@ -72,7 +65,6 @@ func tick(id string) event.Event {
 	return event.Event{ID: id, Source: "/outbox-test", Type: "lab.demo.tick", Data: []byte(`{"n":` + id + `}`)}
 }
 
-// emit writes events through the sink in one transaction and commits it.
 func emit(t *testing.T, db *sqlate.DB, events ...event.Event) {
 	t.Helper()
 	if err := transact(t, db, events...); err != nil {
@@ -88,9 +80,6 @@ func transact(t *testing.T, db *sqlate.DB, events ...event.Event) error {
 	return err
 }
 
-// rows returns how many outbox rows exist, and how many await publication,
-// neither published nor quarantined. It counts on its own, rather than
-// through Pending, so the tests of Pending have a reference.
 func rows(t *testing.T, db *sqlate.DB) (total, pending int) {
 	t.Helper()
 	r, err := db.QueryContext(t.Context(),
@@ -121,7 +110,6 @@ func exists(t *testing.T, db *sqlate.DB, table string) bool {
 	return ok
 }
 
-// indexdef returns the definition of the index named name.
 func indexdef(t *testing.T, db *sqlate.DB, name string) string {
 	t.Helper()
 	r, err := db.QueryContext(t.Context(), `SELECT pg_get_indexdef($1::regclass)`, name)
@@ -137,8 +125,6 @@ func indexdef(t *testing.T, db *sqlate.DB, name string) string {
 	return def
 }
 
-// valid reports whether the index named name is valid: a concurrent build
-// that failed leaves an invalid index behind.
 func valid(t *testing.T, db *sqlate.DB, name string) bool {
 	t.Helper()
 	r, err := db.QueryContext(t.Context(), `SELECT indisvalid FROM pg_index WHERE indexrelid = $1::regclass`, name)
@@ -165,14 +151,9 @@ func TestMigrationsUpAndDown(t *testing.T) {
 			t.Errorf("after up, %s is missing", table)
 		}
 	}
-	// The relay's index covers only the rows it claims: a quarantined row
-	// leaves it as a published one does.
 	if def := indexdef(t, db, "messaging_ix_outbox_unpublished"); !strings.Contains(def, "WHERE ((published_at IS NULL) AND (quarantined_at IS NULL))") {
 		t.Errorf("the unpublished index is %s, want it to leave published and quarantined rows out", def)
 	}
-	// The retentions' indexes hold what each deletes, in the order it
-	// deletes: published rows neither quarantined by publication time, and
-	// handled rows by handling time.
 	retained := map[string]string{
 		"messaging_ix_outbox_published": "(published_at) WHERE ((published_at IS NOT NULL) AND (quarantined_at IS NULL))",
 		"messaging_ix_inbox_handled":    "messaging_inbox USING btree (handled_at)",
@@ -185,7 +166,6 @@ func TestMigrationsUpAndDown(t *testing.T) {
 			t.Errorf("index %s is not valid after its concurrent build", name)
 		}
 	}
-	// The index migrations revert on their own, leaving the tables.
 	if err := m.Down(t.Context(), 2); err != nil {
 		t.Fatalf("down the indexes: %v", err)
 	}
@@ -274,8 +254,6 @@ func TestEmitRejectsAnInvalidEvent(t *testing.T) {
 	}
 }
 
-// Pending counts the rows awaiting publication: neither the published row
-// nor the quarantined one.
 func TestPendingCountsRowsAwaitingPublication(t *testing.T) {
 	db := migrated(t)
 	emit(t, db, tick("1"), tick("2"), tick("3"))
@@ -295,8 +273,6 @@ func TestPendingCountsRowsAwaitingPublication(t *testing.T) {
 	}
 }
 
-// A row is quarantined with its reason or not at all, so no quarantined row
-// lacks the account of why.
 func TestQuarantineNeedsItsReason(t *testing.T) {
 	db := migrated(t)
 	emit(t, db, tick("1"))
@@ -317,9 +293,6 @@ type ticked struct {
 
 var kindTicked = event.Define[ticked]("lab.demo.ticked")
 
-// A recorder over the outbox's sink writes a command's raised events into
-// the command's transaction when its body succeeds, and nothing when it
-// fails, so the rows exist exactly when the state they report committed.
 func TestRecorderEmitsIntoTheCommandsTransaction(t *testing.T) {
 	db := migrated(t)
 	rec := event.NewRecorder(ob.Sink(), "/outbox-test", event.Options{})

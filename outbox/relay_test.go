@@ -16,18 +16,14 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// The relay waits this long between passes in tests that run one pass, so
-// no second pass starts before the test stops it.
 const noPoll = time.Hour
 
 var claimColumns = []string{"seq", "header", "data"}
 
-// claim scripts ClaimRow's response: the row seq holding header and data.
 func claim(seq int64, header, data []byte) sqltest.Response {
 	return sqltest.Response{Columns: claimColumns, Rows: [][]driver.Value{{seq, header, data}}}
 }
 
-// claimEvent scripts ClaimRow returning e, encoded as the sink writes it.
 func claimEvent(t *testing.T, seq int64, e event.Event) sqltest.Response {
 	t.Helper()
 	h, data, err := event.Encode(e)
@@ -41,13 +37,11 @@ func claimEvent(t *testing.T, seq int64, e event.Event) sqltest.Response {
 	return claim(seq, header, data)
 }
 
-// Scripted responses beyond the claims.
 var (
 	noRow    = sqltest.Response{Columns: claimColumns}
 	affected = sqltest.Response{Affected: 1}
 )
 
-// reports collects what a relay reports.
 type reports struct {
 	mu   sync.Mutex
 	errs []error
@@ -65,7 +59,6 @@ func (r *reports) all() []error {
 	return slices.Clone(r.errs)
 }
 
-// publisher records the events a relay hands it, failing those fail names.
 type publisher struct {
 	mu   sync.Mutex
 	got  []string
@@ -85,7 +78,6 @@ func (p *publisher) published() []string {
 	return slices.Clone(p.got)
 }
 
-// waitFor fails the test unless cond holds within a few seconds.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -97,9 +89,6 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// runPass runs r until its first pass has consumed every scripted response
-// and rolled back its last transaction, then stops it and waits for Receive
-// to return, so everything the pass reported has been reported.
 func runPass(t *testing.T, r *outbox.Relay, rec *sqltest.Recorder, fn func(context.Context, event.Event) error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -115,7 +104,6 @@ func runPass(t *testing.T, r *outbox.Relay, rec *sqltest.Recorder, fn func(conte
 	}
 }
 
-// execArgs returns the arguments of each exec whose text contains part.
 func execArgs(rec *sqltest.Recorder, part string) [][]any {
 	var out [][]any
 	for _, c := range rec.Calls() {
@@ -154,7 +142,6 @@ func TestRelayPublishesInSeqOrderOneRowPerTransaction(t *testing.T) {
 }
 
 func TestCorruptRowIsQuarantinedAndTheNextRowPublishes(t *testing.T) {
-	// A header that is not JSON, and one that is but holds no event.
 	undecodable, err := json.Marshal(event.Header{"ce-id": {"x"}})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +164,6 @@ func TestCorruptRowIsQuarantinedAndTheNextRowPublishes(t *testing.T) {
 				t.Errorf("published %v, want [b]: the corrupt row is never handed to the handler", got)
 			}
 			q := execArgs(rec, "SET q")
-			// Quarantine binds reason, then seq, in the statement's order.
 			if len(q) != 1 || q[0][1] != int64(1) {
 				t.Fatalf("quarantined %v, want row 1", q)
 			}
@@ -250,8 +236,6 @@ func TestTransientPublishFailureEndsThePassAndIsReported(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- r.Receive(ctx, pub.publish) }()
 	waitFor(t, "the report", func() bool { return len(rep.all()) > 0 })
-	// The relay settles its readiness after the report, so it is watched
-	// for a quiet window rather than read once.
 	for deadline := time.Now().Add(50 * time.Millisecond); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		if !r.Ready() {
 			t.Fatal("a publish failure made the relay not ready; readiness speaks only for the database")
@@ -326,7 +310,6 @@ func TestDatabaseErrorIsReportedAndMakesTheRelayNotReadyUntilAPassSucceeds(t *te
 	if len(errs) == 0 || !errors.Is(errs[0], broken) {
 		t.Fatalf("reported %v, want the database error first", errs)
 	}
-	// Every later pass finds the outbox empty.
 	for range 10000 {
 		rec.Queue(noRow)
 	}
@@ -397,7 +380,6 @@ func TestStopSettlesTheRowInFlight(t *testing.T) {
 	handler := func(hctx context.Context, _ event.Event) error {
 		close(started)
 		<-ctx.Done()
-		// The stop does not reach the handler of a claimed row.
 		return hctx.Err()
 	}
 	done := make(chan error, 1)
@@ -512,8 +494,6 @@ func TestReadyFromTheStartOfReceive(t *testing.T) {
 	}
 }
 
-// Relay panics on a poll that is not positive and on a negative Timeout or
-// Drain, and accepts a zero Timeout and Drain, the defaults.
 func TestRelayPanicsOnABadPollTimeoutOrDrain(t *testing.T) {
 	db, _ := open(t)
 	ob := newOutbox(t)
@@ -535,8 +515,6 @@ func TestRelayPanicsOnABadPollTimeoutOrDrain(t *testing.T) {
 	ob.Relay(db, time.Second, outbox.RelayOptions{Timeout: 0, Drain: 0})
 }
 
-// Each row's handler runs under the deadline Timeout sets, 10s when it is
-// zero.
 func TestTimeoutBoundsEachHandler(t *testing.T) {
 	for name, tc := range map[string]struct {
 		timeout, want time.Duration
@@ -563,7 +541,6 @@ func TestTimeoutBoundsEachHandler(t *testing.T) {
 	}
 }
 
-// heldGate counts the holders of a gate that never makes one wait.
 type heldGate struct {
 	mu            sync.Mutex
 	held, granted int
@@ -587,8 +564,6 @@ func (g *heldGate) counts() (held, granted int) {
 	return g.held, g.granted
 }
 
-// A relay with a Gate holds it shared for each row, through the row's
-// handler, and releases it once the row settles.
 func TestGateIsHeldSharedForEachRow(t *testing.T) {
 	db, rec := open(t,
 		claimEvent(t, 1, testEvent("a")), affected,
@@ -608,15 +583,12 @@ func TestGateIsHeldSharedForEachRow(t *testing.T) {
 	}
 }
 
-// nilGate is a gate whose nil pointer refuses every holder.
 type nilGate struct{}
 
 var errNilGate = errors.New("nil gate")
 
 func (*nilGate) Shared(context.Context) (func(), error) { return nil, errNilGate }
 
-// A Gate that is a non-nil interface holding a nil pointer is set: the
-// relay holds it, and reports its failure without opening a transaction.
 func TestGateHoldingANilPointerIsHeld(t *testing.T) {
 	db, rec := open(t)
 	var rep reports

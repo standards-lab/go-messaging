@@ -16,7 +16,6 @@ import (
 	"github.com/standards-lab/go-messaging"
 )
 
-// connectWait bounds Start's connection when ctx has no deadline.
 const connectWait = 10 * time.Second
 
 // ErrNotStarted is the failure of a call that needs the connection, made
@@ -33,7 +32,6 @@ type Broker struct {
 	conn     atomic.Pointer[conn]
 }
 
-// conn is the connection a started broker owns, and its JetStream context.
 type conn struct {
 	nc *natsgo.Conn
 	js jetstream.JetStream
@@ -104,7 +102,6 @@ func (b *Broker) Start(ctx context.Context) (err error) {
 	return nil
 }
 
-// provision creates the stream, or updates it to the owner's configuration.
 func (b *Broker) provision(ctx context.Context, js jetstream.JetStream) error {
 	_, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:       b.cfg.Stream,
@@ -120,9 +117,6 @@ func (b *Broker) provision(ctx context.Context, js jetstream.JetStream) error {
 	return nil
 }
 
-// bind looks the stream up, as a non-owner does, and checks that it
-// captures every subject under Prefix, so every event the broker publishes
-// lands in it.
 func (b *Broker) bind(ctx context.Context, js jetstream.JetStream) error {
 	s, err := js.Stream(ctx, b.cfg.Stream)
 	if err != nil {
@@ -137,14 +131,7 @@ func (b *Broker) bind(ctx context.Context, js jetstream.JetStream) error {
 	return fmt.Errorf("nats: bind stream %s: its subjects %q do not capture %s.>", b.cfg.Stream, subjects, b.cfg.Prefix)
 }
 
-// captures reports whether the stream subject subj matches every subject
-// under prefix, that is, every subject Prefix.> matches. Under NATS's
-// wildcard rules, '*' matches one token and '>', as the last token, one or
-// more. So subj captures when, token by token, each of its tokens before
-// the prefix's end is '*' or the prefix's own token, and it ends in '>' no
-// later than the token after the prefix: Prefix.> itself, a parent's .>, or
-// '>'. A '*' in the token after the prefix captures only one more token,
-// and a subject without '>' only a fixed number, so neither captures.
+// See docs/internals.md
 func captures(subj, prefix string) bool {
 	want := strings.Split(prefix, ".")
 	for i, tok := range strings.Split(subj, ".") {
@@ -185,7 +172,6 @@ func (b *Broker) Shutdown(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	// A connection that is reconnecting cannot drain, and Drain closes it.
 	if err := c.nc.Drain(); err != nil && !errors.Is(err, natsgo.ErrConnectionClosed) && !errors.Is(err, natsgo.ErrConnectionReconnecting) {
 		c.nc.Close()
 		return fmt.Errorf("nats: drain: %w", err)
@@ -235,14 +221,10 @@ func (b *Broker) Publish(ctx context.Context, e event.Event) error {
 	return nil
 }
 
-// msgID is e's deduplication key: its source and id, which together
-// identify a CloudEvents event. The source is length-prefixed, so no source
-// and id pair can spell another's key.
 func msgID(e event.Event) string {
 	return strconv.Itoa(len(e.Source)) + ":" + e.Source + e.ID
 }
 
-// carriable fails on a header value the NATS protocol cannot carry.
 func carriable(h event.Header) error {
 	for name, vs := range h {
 		for _, v := range vs {
@@ -254,10 +236,6 @@ func carriable(h event.Header) error {
 	return nil
 }
 
-// namespaced fails, as [event.Permanent], on a type outside Prefix: one
-// that does not start with Prefix and a further token. The type is the
-// subject, and the stream captures Prefix.>, which matches one or more
-// tokens after the prefix, so the prefix itself is outside it too.
 func (b *Broker) namespaced(typ string) error {
 	if !strings.HasPrefix(typ, b.cfg.Prefix+".") {
 		return event.Permanent(fmt.Errorf("type %q is not under the prefix %q", typ, b.cfg.Prefix))

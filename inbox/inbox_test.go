@@ -15,8 +15,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// claim compiles a claim statement from text over sqlate's test dialect, so
-// the engine contract is tested without a driver.
 func claim(t *testing.T, text string) query.Statement {
 	t.Helper()
 	fsys := fstest.MapFS{"s/claim.sql": &fstest.MapFile{Data: []byte("--| tier: standard\n" + text)}}
@@ -25,8 +23,6 @@ func claim(t *testing.T, text string) query.Statement {
 
 const claimText = "INSERT INTO i (c, s, id) VALUES ({{consumer}}, {{source}}, {{id}})"
 
-// newInbox returns an inbox over a complete engine, and a session over
-// sqlate's scripted driver queued with responses.
 func newInbox(t *testing.T, responses ...sqltest.Response) (*inbox.Inbox, *sqlate.DB, *sqltest.Recorder) {
 	t.Helper()
 	in, err := inbox.New(inbox.Engine{Claim: claim(t, "--| transaction: required\n"+claimText)})
@@ -39,8 +35,6 @@ func newInbox(t *testing.T, responses ...sqltest.Response) (*inbox.Inbox, *sqlat
 
 var placed = event.Event{ID: "e1", Source: "test/orders", Type: "order.placed"}
 
-// claimIn runs Claim in a transaction of its own, which commits unless
-// rollback is set.
 func claimIn(t *testing.T, in *inbox.Inbox, db *sqlate.DB, consumer string, rollback bool) (bool, error) {
 	t.Helper()
 	ctx := context.Background()
@@ -81,8 +75,6 @@ func TestNewChecksTheStatementsParameters(t *testing.T) {
 }
 
 func TestClaimIsFirstOnlyWhenItRecordsTheClaim(t *testing.T) {
-	// The engine records the claim the first time, and changes nothing on a
-	// repeat.
 	in, db, rec := newInbox(t, sqltest.Response{Affected: 1}, sqltest.Response{Affected: 0})
 	if first, err := claimIn(t, in, db, "orders", false); err != nil || !first {
 		t.Fatalf("first Claim = %v, %v; want true", first, err)
@@ -102,8 +94,6 @@ func TestClaimRunsInTheHandlersTransaction(t *testing.T) {
 	if _, err := claimIn(t, in, db, "orders", true); err != nil {
 		t.Fatal(err)
 	}
-	// The claim rolls back with the handler's work, so the engine releases
-	// it for the redelivery.
 	want := []sqltest.Op{sqltest.OpBegin, sqltest.OpExec, sqltest.OpRollback}
 	if ops := rec.Ops(); !slices.Equal(ops, want) {
 		t.Errorf("ops = %v, want %v", ops, want)

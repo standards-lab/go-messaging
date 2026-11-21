@@ -19,16 +19,15 @@ import (
 // never lock; the broker and the sources take mu around them.
 type Broker struct {
 	mu        sync.Mutex
-	log       []message // an event's sequence is its index
+	log       []message
 	consumers map[string]*consumer
-	seen      map[identity]time.Time // to when it was first published, within the window
+	seen      map[identity]time.Time
 }
 
-// identity is what makes a CloudEvents event unique: its source and id.
 type identity struct{ source, id string }
 
 type message struct {
-	typ    string // kept beside the header, so the type filter need not decode
+	typ    string
 	header event.Header
 	body   []byte
 }

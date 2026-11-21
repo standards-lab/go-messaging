@@ -25,7 +25,8 @@ func New(eng Engine) (*Outbox, error) {
 
 // Sink returns the [event.Sink] a composition root builds a service's
 // [event.Recorder] over: it writes the events a command raises into the
-// command's own transaction.
+// command's own transaction, in order. An event whose source and id are
+// already in the outbox fails the write, and so the transaction.
 func (o *Outbox) Sink() event.Sink[*sqlate.Tx] { return sink{o.eng} }
 
 // Relay returns a relay over the outbox in db that waits poll between

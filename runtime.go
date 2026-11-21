@@ -164,9 +164,7 @@ func (r *Runtime) Relay(db sqlate.Beginner) *reactor.Reactor[event.Event] {
 		Report:  func(ctx context.Context, err error) { r.hook(ctx, relayFailure(err)) },
 		Timeout: r.cfg.RelayTimeout.Duration(),
 		Drain:   r.shutdown / 4,
-		// A nil runtime gate converts to a nil outbox.Gate, so the relay
-		// holds none.
-		Gate: r.gate,
+		Gate:    r.gate,
 	})
 	publish := func(ctx context.Context, e event.Event) error {
 		if err := r.broker.Publish(ctx, e); err != nil {
@@ -223,14 +221,10 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 	handle := func(ctx context.Context, e event.Event) error {
 		release, ended, err := r.share(ctx)
 		if ended {
-			// Nothing was handed over, and the error leaves the event to
-			// the broker's redelivery.
 			return err
 		}
 		var data T
 		repeat := false
-		// A gate that failed otherwise skips fn, and its error is the
-		// delivery's outcome, as a transient error of fn's would be.
 		if err == nil {
 			defer release()
 			if derr := json.Unmarshal(e.Data, &data); derr != nil {
@@ -250,8 +244,6 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 			r.logger.WarnContext(ctx, "event refused", append(attrs, "outcome", "refused", "error", err)...)
 		case err != nil:
 			r.logger.InfoContext(ctx, "event consumed", append(attrs, "outcome", "retried", "error", err)...)
-			// A provider that gives no attempt leaves Attempt 0, which only
-			// an unlimited subscription's MaxDeliver would equal.
 			if attempt := Attempt(ctx); sub.MaxDeliver > 0 && attempt == sub.MaxDeliver {
 				r.hook(ctx, Failure{Kind: FailureExhausted, Consumer: sub.Name, Attempt: attempt, Err: err}.identify(e))
 			}
@@ -265,10 +257,6 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 	return reactor.New(src, handle, reactor.Options{CancelAfter: reactor.CancelWithin(r.shutdown)}), nil
 }
 
-// share holds the runtime's gate shared for the delivery whose handler
-// context is ctx, waiting until ctx ends or its reactor begins to drain;
-// without a gate it holds nothing and returns at once. ended reports a
-// wait that ctx or the drain ended, which holds nothing.
 func (r *Runtime) share(ctx context.Context) (release func(), ended bool, err error) {
 	if r.gate == nil {
 		return func() {}, false, nil

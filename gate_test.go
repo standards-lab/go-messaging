@@ -19,12 +19,8 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// settleTime is how long a test lets a gated reactor run before it checks
-// that the reactor did nothing.
 const settleTime = 50 * time.Millisecond
 
-// hold holds g exclusively, as an operation that pauses the background work
-// does, and returns the release, which the test's end also calls.
 func hold(t *testing.T, g *reactor.Gate) func() {
 	t.Helper()
 	release, err := g.Exclusive(t.Context())
@@ -35,14 +31,10 @@ func hold(t *testing.T, g *reactor.Gate) func() {
 	return release
 }
 
-// failingGate is a gate whose Shared fails with err.
 type failingGate struct{ err error }
 
 func (g failingGate) Shared(context.Context) (func(), error) { return nil, g.err }
 
-// watchedGate is a reactor.Gate that notes, as each shared hold begins and
-// ends, the database operation the relay ran last, so a test sees what the
-// relay ran outside the gate.
 type watchedGate struct {
 	reactor.Gate
 
@@ -76,9 +68,6 @@ func (g *watchedGate) holds() []string {
 	return slices.Clone(g.seen)
 }
 
-// gatedRelay starts the relay of a runtime built with gate over a scripted
-// database, polling hourly so each test runs one pass and the last; it
-// returns the relay, the script's recorder, the broker, and the failures.
 func gatedRelay(t *testing.T, gate messaging.Gate, script ...sqltest.Response) (*reactor.Reactor[event.Event], *sqltest.Recorder, *fakeBroker, *failures) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, script...)
@@ -91,8 +80,6 @@ func gatedRelay(t *testing.T, gate messaging.Gate, script ...sqltest.Response) (
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// A relay that waits on a gate the test still holds cannot drain, so
-	// the cleanup's shutdown gives up after the failsafe.
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), failsafe)
 		defer cancel()
@@ -101,26 +88,19 @@ func gatedRelay(t *testing.T, gate messaging.Gate, script ...sqltest.Response) (
 	return r, rec, b, f
 }
 
-// published counts the events b was handed.
 func (b *fakeBroker) published() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.deadlines)
 }
 
-// A gated relay opens no transaction while an exclusive holder holds the
-// gate, and publishes once it is released. It holds the gate for each row
-// from before the row's transaction begins until after it commits or rolls
-// back, so it runs nothing outside the gate.
 func TestRelayGateWaitsForTheExclusiveHolder(t *testing.T) {
 	g := &watchedGate{}
 	release := hold(t, &g.Gate)
 	r, rec, b, f := gatedRelay(t, g,
 		claimEvent(t, 1, event1), sqltest.Response{Affected: 1}, sqltest.Response{Columns: claimColumns},
-		// The last pass, on shutdown.
 		sqltest.Response{Columns: claimColumns},
 	)
-	// The relay waits on the gate, so it cannot yet look at rec.
 	g.mu.Lock()
 	g.rec = rec
 	g.mu.Unlock()
@@ -133,9 +113,6 @@ func TestRelayGateWaitsForTheExclusiveHolder(t *testing.T) {
 	}
 	release()
 	waitFor(t, "the publish", func() bool { return b.published() == 1 })
-	// The pass ends on the empty claim; once the relay is asleep, an
-	// exclusive holder is admitted at once and sees both rows' transactions
-	// settled.
 	waitFor(t, "the pass's end", func() bool { return rec.Pending() == 1 })
 	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
 	defer cancel()
@@ -154,7 +131,6 @@ func TestRelayGateWaitsForTheExclusiveHolder(t *testing.T) {
 	if got := f.all(); len(got) != 0 {
 		t.Errorf("hook got %+v, want nothing", got)
 	}
-	// Two rows in the first pass, and the last pass's one.
 	want := []string{
 		"held after none", "released after commit",
 		"held after commit", "released after rollback",
@@ -165,9 +141,6 @@ func TestRelayGateWaitsForTheExclusiveHolder(t *testing.T) {
 	}
 }
 
-// A relay still waiting on the gate when it is stopped claims no row and
-// reports nothing: the stop ends its wait, and the last pass's own bound
-// ends that pass's, inside the drain, so the shutdown does not cancel it.
 func TestRelayGateStopEndsTheWaitAndReportsNothing(t *testing.T) {
 	var g reactor.Gate
 	hold(t, &g)
@@ -189,9 +162,6 @@ func TestRelayGateStopEndsTheWaitAndReportsNothing(t *testing.T) {
 	}
 }
 
-// A gate that fails other than by its wait ending fails the pass, which is
-// reported as a relay failure, before any transaction; the relay stays
-// ready, since the database did not fail.
 func TestRelayGateFailureIsReported(t *testing.T) {
 	broken := errors.New("gate broken")
 	r, rec, _, f := gatedRelay(t, failingGate{broken})
@@ -207,9 +177,6 @@ func TestRelayGateFailureIsReported(t *testing.T) {
 	}
 }
 
-// gatedConsumer builds a runtime over b with gate whose failures go to f
-// and log to log, and returns an unstarted consumer of sub that sends each
-// delivery's attempt on the channel returned.
 func gatedConsumer(t *testing.T, b messaging.Broker, f *failures, log *syncBuffer, sub messaging.Subscription, gate messaging.Gate) (*reactor.Reactor[event.Event], <-chan int) {
 	t.Helper()
 	s := setup(t, b, slog.New(slog.NewTextHandler(log, nil)))
@@ -225,8 +192,6 @@ func gatedConsumer(t *testing.T, b messaging.Broker, f *failures, log *syncBuffe
 	return r, attempts
 }
 
-// A gated consumer's handler is not called while an exclusive holder holds
-// the gate, and is called on the same delivery once the gate is released.
 func TestConsumerGateWaitsForTheExclusiveHolder(t *testing.T) {
 	var g reactor.Gate
 	release := hold(t, &g)
@@ -250,10 +215,6 @@ func TestConsumerGateWaitsForTheExclusiveHolder(t *testing.T) {
 	}
 }
 
-// A drain that ends a delivery's wait on the gate hands the handler
-// nothing, logs and reports nothing, and leaves the event unacknowledged:
-// the consumer's next member receives it again, on its second attempt. The
-// drain ends the wait itself, so the shutdown cancels no handler.
 func TestConsumerGateDrainLeavesTheEventForRedelivery(t *testing.T) {
 	var g reactor.Gate
 	release := hold(t, &g)
@@ -292,10 +253,6 @@ func TestConsumerGateDrainLeavesTheEventForRedelivery(t *testing.T) {
 	awaitAttempts(t, again, 2)
 }
 
-// A gate that fails other than by its wait ending is the delivery's
-// outcome, as a transient error of the handler's would be: the handler is
-// never called, each delivery is logged as retried, and the last is
-// reported as exhausted with the gate's error.
 func TestConsumerGateFailureExhausts(t *testing.T) {
 	broken := errors.New("gate broken")
 	b := memory.New()
@@ -322,8 +279,6 @@ func TestConsumerGateFailureExhausts(t *testing.T) {
 	}
 }
 
-// Without a gate, neither the relay nor a consumer holds any, so a held
-// one stops neither.
 func TestRuntimeWithoutAGateHoldsNone(t *testing.T) {
 	var g reactor.Gate
 	hold(t, &g)
@@ -346,16 +301,12 @@ func TestRuntimeWithoutAGateHoldsNone(t *testing.T) {
 	}
 }
 
-// nilGate is a gate whose nil pointer is usable: Shared fails with
-// errNilGate, so a test sees that a typed nil was held.
 type nilGate struct{}
 
 var errNilGate = errors.New("nil gate held")
 
 func (*nilGate) Shared(context.Context) (func(), error) { return nil, errNilGate }
 
-// A Gate that is a non-nil interface holding a nil pointer is set: the
-// relay and a consumer both hold it, and its failure reaches the hook.
 func TestTypedNilGateIsHeld(t *testing.T) {
 	var gate *nilGate
 	_, rec, _, f := gatedRelay(t, gate)

@@ -16,8 +16,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// compile builds statements from text keyed by name, over sqlate's test
-// dialect, so the engine contract is tested without a driver.
 func compile(t *testing.T, files map[string]string) *query.Statements {
 	t.Helper()
 	fsys := fstest.MapFS{}
@@ -32,8 +30,6 @@ const (
 	quarantine = "UPDATE o SET q = now(), r = {{reason}} WHERE seq = {{seq}}"
 )
 
-// engineWith returns a complete engine whose Emit and Quarantine are the
-// texts given.
 func engineWith(t *testing.T, emit, quarantine string) outbox.Engine {
 	t.Helper()
 	s := compile(t, map[string]string{
@@ -50,7 +46,6 @@ func engineWith(t *testing.T, emit, quarantine string) outbox.Engine {
 	}
 }
 
-// newOutbox returns an outbox over a complete engine.
 func newOutbox(t *testing.T) *outbox.Outbox {
 	t.Helper()
 	ob, err := outbox.New(engineWith(t, emit, quarantine))
@@ -60,15 +55,12 @@ func newOutbox(t *testing.T) *outbox.Outbox {
 	return ob
 }
 
-// open returns a session over sqlate's scripted driver, queued with
-// responses, and the recorder behind it.
 func open(t *testing.T, responses ...sqltest.Response) (*sqlate.DB, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	return sqlate.Wrap(pool, sqltest.Dialect{}), rec
 }
 
-// testEvent returns a valid event with id.
 func testEvent(id string) event.Event {
 	return event.Event{
 		ID:     id,
@@ -149,7 +141,6 @@ func TestSinkWritesEachEventInTheCommandsTransaction(t *testing.T) {
 	var ids []any
 	for _, c := range rec.Calls() {
 		if c.Op == sqltest.OpExec {
-			// Emit binds source, id, header, and data, in that order.
 			if c.Args[0] != "test/orders" {
 				t.Errorf("source = %v, want test/orders", c.Args[0])
 			}

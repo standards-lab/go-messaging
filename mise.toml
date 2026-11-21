@@ -1,34 +1,22 @@
+# See architecture/standards/go-elemental/principles/release-and-ci.md
+# See architecture/principles/rolling-currency.md
+[settings]
+task.run_auto_install = false
+
 [tools]
 go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
-# crane lists an image's tags for currency's image scan.
 "aqua:google/go-containerregistry" = "0.22.1"
+"github:standards-lab/claude-plugins" = { version = "0.22.0", version_prefix = "marathon/v" }
 
-# Space-separated list of module directories, kept in sync with the go.work
-# use-list. "." is the base module; postgres is the database engine
-# sub-module and nats the broker provider sub-module. The maintenance tasks
-# below skip a directory without a go.mod; check, currency, and upgrade
-# require one.
 [env]
 GO_MODULES = ". postgres nats"
-# The integration suite's server: compose.yml's PostgreSQL, whose port
-# follows POSTGRES_PORT as compose/postgres.yml's does. Each test creates
-# and drops its own database on it.
 MESSAGING_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5435') }}/app?sslmode=disable"
-# The nats integration suite's server: compose.yml's NATS, whose port
-# follows NATS_PORT as compose/nats.yml's does. Each test creates and
-# deletes its own stream on it.
 MESSAGING_NATS_URL = "nats://127.0.0.1:{{ get_env(name='NATS_PORT', default='4225') }}"
 
-# The one check: read-only and deterministic, stopping at the first failure.
-# Each module builds with the workspace off, proving it resolves its own
-# pins standalone, and lints under the .golangci.yml nearest it. Vet and
-# lint include the integration build tag, so the integration suite compiles
-# without a database; postgres's .golangci.yml sets the tag for its lint.
-# sqlint then lints the postgres module's statements and migrations.
 [tasks.check]
-description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the postgres module; writes nothing"
+description = "Build, vet, format, fix, tidy, test, and lint every module with the workspace off, vet and lint covering the integration build tag, then sqlint the postgres module's statements and migrations, stopping at the first failure, then run both lint-context and lint-references; writes nothing"
 run = '''
 set -eu
 export GOWORK=off
@@ -44,24 +32,32 @@ for mod in $GO_MODULES; do
   go test -race ./...
   golangci-lint run ./...
 done
-# sqlint is the postgres module's tool, and resolves the engine sqlint.toml
-# names through the module's own requirements.
 echo "check: sqlint"
 cd "$MISE_PROJECT_ROOT/postgres"
 go tool sqlint .
+cd "$MISE_PROJECT_ROOT"
+fail=0
+for lint in lint-context lint-references; do
+  echo "check: $lint"
+  if ! command -v "$lint" >/dev/null; then
+    echo "FAIL: $lint is not on PATH; run mise install" >&2
+    fail=1
+  elif ! "$lint"; then
+    fail=1
+  fi
+done
+exit "$fail"
 '''
 
-# Currency: report what trails its latest, and the convenience that upgrades it.
 [tasks.currency]
-description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
+description = "Report every requirement, Go version, tool, action pin, and image tag (listed with crane) behind its latest; writes nothing"
 run = "scripts/currency.sh"
 
 [tasks.upgrade]
-description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+description = "Upgrade every module's go directive to the current Go minor with no toolchain line, its direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
 run = '''
 set -eu
 export GOWORK=off
-# The go directive follows the current Go minor, with no toolchain line.
 go_minor=$(mise latest go | cut -d. -f1,2)
 for mod in $GO_MODULES; do
   cd "$MISE_PROJECT_ROOT/$mod"
@@ -74,7 +70,6 @@ cd "$MISE_PROJECT_ROOT"
 mise upgrade --bump --local
 '''
 
-# Maintenance.
 [tasks.tidy]
 description = "Run go mod tidy across all modules"
 run = '''
@@ -86,7 +81,6 @@ for mod in $GO_MODULES; do
 done
 '''
 
-# Verification.
 [tasks.fmt]
 description = "Format all Go source"
 run = "gofmt -w ."
@@ -124,7 +118,6 @@ for mod in $GO_MODULES; do
 done
 '''
 
-# Testing.
 [tasks.test]
 description = "Run the unit tier across all modules"
 run = '''
@@ -136,14 +129,8 @@ for mod in $GO_MODULES; do
 done
 '''
 
-# The integration tier runs each module's suite against its compose service:
-# the postgres module's against the PostgreSQL MESSAGING_DSN names, the nats
-# module's against the NATS MESSAGING_NATS_URL names. Each service keeps its
-# data in tmpfs, so every start is empty. Each task starts only its own
-# service, runs the suite, and stops the service whether the suite passes or
-# fails, printing its log on failure.
 [tasks."integration:postgres"]
-description = "Run the postgres module's integration suite against a fresh compose PostgreSQL"
+description = "Run the postgres module's integration suite against a fresh compose PostgreSQL at MESSAGING_DSN, then stop it, printing its log on failure"
 env = { GOWORK = "off" }
 run = '''
 set -e
@@ -153,7 +140,7 @@ docker compose up -d --wait --build postgres
 '''
 
 [tasks."integration:nats"]
-description = "Run the nats module's integration suite against a fresh compose NATS"
+description = "Run the nats module's integration suite against a fresh compose NATS at MESSAGING_NATS_URL, then stop it, printing its log on failure"
 env = { GOWORK = "off" }
 run = '''
 set -e
@@ -162,9 +149,8 @@ docker compose up -d --wait --build nats
 (cd nats && go test -race -tags integration -count=1 -v ./...)
 '''
 
-# One module at a time, every module even after one fails.
 [tasks.integration]
-description = "Run every module's integration suite, each against a fresh compose service"
+description = "Run every module's integration suite in turn, each against a fresh compose service, even after one fails"
 run = '''
 rc=0
 mise run integration:postgres || rc=1

@@ -9,8 +9,7 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// The retention statements are outside the Engine contracts, as
-// countPending is: neither the relay nor the inbox's claim deletes a row.
+// See docs/internals.md
 var (
 	reclaimOutbox = statements.Statement("reclaim_outbox")
 	reclaimInbox  = statements.Statement("reclaim_inbox")

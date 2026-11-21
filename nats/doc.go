@@ -49,7 +49,12 @@
 // source reports each error it survives to its report function, among them
 // every failed pull. A pull that ends empty while the connection is down
 // counts as failed, so during an outage a member reports about every 1.1
-// seconds and is not ready until a pull succeeds again.
+// seconds and is not ready until a pull succeeds again. Receive fails with
+// [ErrNotStarted] before the broker's Start, and when the binding fails, as
+// when the Name's consumer has another configuration; it ends with an error
+// when the connection closes or the consumer or its stream is deleted. A
+// message it cannot decode, or whose metadata does not parse, is terminated
+// and reported. A handler error never ends Receive.
 //
 // [Broker.Conn] is the native handle, for uses beyond the standard tier such
 // as request and reply. It belongs in the composition root.

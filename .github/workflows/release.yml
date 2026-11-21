@@ -1,9 +1,10 @@
-name: Release
-
 # A pushed tag releases the module it names: v<semver> the base module,
 # postgres/v<semver> and nats/v<semver> the sub-modules. The tag's path
 # prefix picks the module's changelog, whose matching section becomes the
 # release notes.
+# See architecture/standards/go-elemental/principles/release-and-ci.md
+name: Release
+
 on:
   push:
     tags:

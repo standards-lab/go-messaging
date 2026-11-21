@@ -19,8 +19,6 @@ func TestConformance(t *testing.T) {
 	messagingtest.Run(t, func(*testing.T) messaging.Broker { return memory.New() })
 }
 
-// A late error, after another member has already handled the redelivery,
-// must not schedule a third delivery.
 func TestLateOutcomeIgnored(t *testing.T) {
 	b := memory.New()
 	sub := messaging.Subscription{Name: "late", AckWait: 50 * time.Millisecond}
@@ -29,7 +27,7 @@ func TestLateOutcomeIgnored(t *testing.T) {
 	var wg sync.WaitGroup
 	handler := func(ctx context.Context, _ event.Event) error {
 		if calls.Add(1) == 1 {
-			<-release // outlive AckWait, ignoring the deadline
+			<-release
 			return errors.New("late failure")
 		}
 		return nil
@@ -76,7 +74,7 @@ func TestBindingComparesMeaning(t *testing.T) {
 	if _, err := b.Subscribe(messaging.Subscription{Name: "n", Types: types}, nil); err != nil {
 		t.Fatal(err)
 	}
-	types[0] = "changed" // the consumer must keep its own copy
+	types[0] = "changed"
 	if _, err := b.Subscribe(messaging.Subscription{Name: "n", Types: []string{"a", "b"}, AckWait: messaging.DefaultAckWait}, nil); err != nil {
 		t.Errorf("the same types in another order, with the default AckWait spelled out, must bind: %v", err)
 	}
@@ -90,8 +88,6 @@ func TestBindingComparesMeaning(t *testing.T) {
 
 type ctxKey struct{}
 
-// A message that cannot decode is reported with the context the source
-// receives under, and terminated, and the next event still delivers.
 func TestUndecodableReportedAndTerminated(t *testing.T) {
 	b := memory.New()
 	type reported struct {
@@ -151,7 +147,6 @@ func TestUndecodableReportedAndTerminated(t *testing.T) {
 	}
 }
 
-// A nil report discards what the source survives; the source keeps going.
 func TestNilReportDiscards(t *testing.T) {
 	b := memory.New()
 	src, err := b.Subscribe(messaging.Subscription{Name: "discard"}, nil)
