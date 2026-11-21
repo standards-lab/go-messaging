@@ -25,10 +25,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats/natstest"
 )
 
-// TestConformance runs the base contract's suite on an owner broker, each
-// case on its own scratch stream. The suite's types name no namespace, so
-// they reach the broker under the scratch prefix, as a service's own types
-// sit under its prefix.
 func TestConformance(t *testing.T) {
 	url := natstest.Open(t)
 	messagingtest.Run(t, func(t *testing.T) messaging.Broker {
@@ -38,10 +34,6 @@ func TestConformance(t *testing.T) {
 	})
 }
 
-// namespaced is a broker whose callers' types are relative to prefix: it
-// publishes and subscribes to prefix.<type>, and delivers each event with
-// its type relative again. An empty type stays empty, so an event without
-// one is refused for that, as the suite expects.
 type namespaced struct {
 	*nats.Broker
 	prefix string
@@ -67,8 +59,6 @@ func (n namespaced) Subscribe(sub messaging.Subscription, report messaging.Repor
 	return relative{Source: src, prefix: n.prefix}, nil
 }
 
-// relative is a source that delivers each event with its type relative to
-// prefix.
 type relative struct {
 	reactor.Source[event.Event]
 	prefix string
@@ -81,8 +71,6 @@ func (r relative) Receive(ctx context.Context, fn reactor.Func[event.Event]) err
 	})
 }
 
-// ownerBroker is a started owner broker on a scratch stream, with the
-// stream's name and prefix.
 func ownerBroker(t *testing.T) (b *nats.Broker, url, stream, prefix string) {
 	t.Helper()
 	url = natstest.Open(t)
@@ -102,7 +90,6 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// reports collects the errors a source reports.
 type reports struct {
 	mu   sync.Mutex
 	errs []error
@@ -120,9 +107,6 @@ func (r *reports) seen() []error {
 	return append([]error(nil), r.errs...)
 }
 
-// member subscribes under sub with report, starts a reactor on the source,
-// and waits until it is receiving. The cleanup shuts it down, before the
-// broker's own cleanup, which registered earlier.
 func member(t *testing.T, b *nats.Broker, sub messaging.Subscription, report messaging.Report, fn reactor.Func[event.Event]) {
 	t.Helper()
 	src, err := b.Subscribe(sub, report)
@@ -141,8 +125,6 @@ func member(t *testing.T, b *nats.Broker, sub messaging.Subscription, report mes
 	eventually(t, "the member to be receiving", r.Ready)
 }
 
-// receive runs src's Receive with fn in the background, returning the
-// channel its result arrives on.
 func receive(t *testing.T, src reactor.Source[event.Event], fn reactor.Func[event.Event]) <-chan error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -150,7 +132,6 @@ func receive(t *testing.T, src reactor.Source[event.Event], fn reactor.Func[even
 	return done
 }
 
-// ended waits for Receive's result, failing the test when it does not come.
 func ended(t *testing.T, done <-chan error, what string) error {
 	t.Helper()
 	select {
@@ -162,7 +143,6 @@ func ended(t *testing.T, done <-chan error, what string) error {
 	}
 }
 
-// consumerInfo is the durable's current state.
 func consumerInfo(t *testing.T, js jetstream.JetStream, stream, name string) *jetstream.ConsumerInfo {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
@@ -178,8 +158,6 @@ func consumerInfo(t *testing.T, js jetstream.JetStream, stream, name string) *je
 	return info
 }
 
-// The first Receive binds the durable on a config derived from the
-// normalized subscription.
 func TestSourceBindsConsumer(t *testing.T) {
 	b, url, stream, prefix := ownerBroker(t)
 	sub := messaging.Subscription{Name: "derived", Types: []string{prefix + ".b", prefix + ".a", prefix + ".a"}, MaxDeliver: 4, AckWait: 2 * time.Second, Start: messaging.StartNew}
@@ -216,8 +194,6 @@ func TestSourceBindsConsumer(t *testing.T) {
 	}
 }
 
-// A subscription under an existing Name with a different config fails its
-// Receive, and leaves the consumer as the first made it.
 func TestSourceDifferentConfigFails(t *testing.T) {
 	b, url, stream, _ := ownerBroker(t)
 	member(t, b, messaging.Subscription{Name: "fixed", MaxDeliver: 3}, nil, func(context.Context, event.Event) error { return nil })
@@ -238,10 +214,6 @@ func TestSourceDifferentConfigFails(t *testing.T) {
 	}
 }
 
-// An outcome settled after the handler's deadline, but before the
-// consumer's AckWait, which is AckMargin longer, is dropped: had the
-// acknowledgement been sent, the server would have taken it and never
-// redelivered the event.
 func TestSourceDropsLateOutcome(t *testing.T) {
 	b, _, _, prefix := ownerBroker(t)
 	var mu sync.Mutex
@@ -253,7 +225,7 @@ func TestSourceDropsLateOutcome(t *testing.T) {
 		mu.Unlock()
 		if first {
 			<-ctx.Done()
-			time.Sleep(nats.AckMargin / 5) // late, but within the margin
+			time.Sleep(nats.AckMargin / 5)
 		}
 		return nil
 	})
@@ -270,8 +242,6 @@ func TestSourceDropsLateOutcome(t *testing.T) {
 	}
 }
 
-// A message that does not decode is reported, terminated so it is never
-// delivered again, and passed over for the next.
 func TestSourceReportsUndecodable(t *testing.T) {
 	b, url, stream, prefix := ownerBroker(t)
 	var r reports
@@ -296,7 +266,6 @@ func TestSourceReportsUndecodable(t *testing.T) {
 		defer mu.Unlock()
 		return len(handled) == 1
 	})
-	// Past the consumer's AckWait, an unsettled message would be back.
 	time.Sleep(3 * (sub.AckWait + nats.AckMargin))
 	errs := r.seen()
 	if len(errs) != 1 {
@@ -312,9 +281,6 @@ func TestSourceReportsUndecodable(t *testing.T) {
 	}
 }
 
-// A member whose consumer is deleted while it handles a delivery, so no
-// pull is waiting to hear of it, reports the acknowledgement that fails to
-// send, then ends Receive once its next pulls fail.
 func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
 	b, url, stream, prefix := ownerBroker(t)
 	var r reports
@@ -349,8 +315,6 @@ func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
 	if src.Ready() {
 		t.Error("the source reports ready after Receive ended")
 	}
-	// Failed pulls are reported too, so only a report that names the
-	// acknowledgement proves its failure reached the report function.
 	acked := false
 	for _, e := range r.seen() {
 		t.Logf("reported: %v", e)
@@ -361,14 +325,9 @@ func TestSourceDeletedConsumerEndsReceive(t *testing.T) {
 	}
 }
 
-// A deleted stream ends Receive with its error: the consumer's deletion,
-// which a waiting pull hears of, or the stream's absence, which the member
-// learns by asking once its pulls fail. A deletion that lands between one
-// pull's expiry and the next is learned by asking, so a waiting pull accepts
-// either error.
 func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 	for name, tc := range map[string]struct {
-		hold bool // the handler holds a delivery, so no pull is waiting
+		hold bool
 		want []error
 	}{
 		"while pulling":  {want: []error{jetstream.ErrConsumerDeleted, jetstream.ErrStreamNotFound}},
@@ -412,9 +371,6 @@ func TestSourceDeletedStreamEndsReceive(t *testing.T) {
 	}
 }
 
-// A handler error under a zero RetryDelay is nak'd at once: the event comes
-// back promptly, long before the consumer's AckWait would return it
-// unsettled.
 func TestSourceNaksAtOnceWithoutRetryDelay(t *testing.T) {
 	b, _, _, prefix := ownerBroker(t)
 	sub := messaging.Subscription{Name: "prompt", AckWait: 5 * time.Second}
@@ -447,16 +403,11 @@ func TestSourceNaksAtOnceWithoutRetryDelay(t *testing.T) {
 	if ds[0].attempt != 1 || ds[1].attempt != 2 {
 		t.Errorf("attempts %d then %d, want 1 then 2", ds[0].attempt, ds[1].attempt)
 	}
-	// Unsettled, the event would be back only after the consumer's AckWait,
-	// over five seconds.
 	if gap := ds[1].at.Sub(ds[0].at); gap > time.Second {
 		t.Errorf("redelivered after %v, want well under the AckWait of %v", gap, sub.AckWait+nats.AckMargin)
 	}
 }
 
-// A member handles one message at a time: while its handler holds one, the
-// next waits on the server, unpulled, and is delivered once the first
-// settles.
 func TestSourceOneMessageAtATime(t *testing.T) {
 	b, url, stream, prefix := ownerBroker(t)
 	handling := make(chan string, 2)
@@ -469,8 +420,6 @@ func TestSourceOneMessageAtATime(t *testing.T) {
 		}
 		return nil
 	})
-	// Registered after the member's, so it runs first and frees a held
-	// handler before the member shuts down.
 	t.Cleanup(func() { close(release) })
 	publish(t, b, event.Event{ID: "one", Source: "/test", Type: prefix + ".t"})
 	publish(t, b, event.Event{ID: "two", Source: "/test", Type: prefix + ".t"})
@@ -501,8 +450,6 @@ func TestSourceOneMessageAtATime(t *testing.T) {
 	}
 }
 
-// A source with no report function discards what it would report: it
-// survives a message that does not decode and handles the next.
 func TestSourceNilReportDiscards(t *testing.T) {
 	b, url, _, prefix := ownerBroker(t)
 	got := make(chan string, 1)
@@ -526,7 +473,6 @@ func TestSourceNilReportDiscards(t *testing.T) {
 	}
 }
 
-// A closed connection ends Receive with its error.
 func TestSourceClosedConnectionEndsReceive(t *testing.T) {
 	b, _, _, _ := ownerBroker(t)
 	src, err := b.Subscribe(messaging.Subscription{Name: "cut"}, nil)
@@ -545,9 +491,6 @@ func TestSourceClosedConnectionEndsReceive(t *testing.T) {
 	}
 }
 
-// A subscription filters on its types as subjects: its member receives
-// the events of those types, each with its type, and none of another type,
-// even one that extends a filtered type.
 func TestSourceFiltersOnTypes(t *testing.T) {
 	b, _, _, prefix := ownerBroker(t)
 	want, also := prefix+".orders.created", prefix+".orders.paid"
@@ -576,7 +519,6 @@ func TestSourceFiltersOnTypes(t *testing.T) {
 	}
 }
 
-// A non-owner's member receives the events the owner publishes.
 func TestSourceNonOwnerReceives(t *testing.T) {
 	own, url, stream, prefix := ownerBroker(t)
 	other := started(t, nats.Config{URL: url, Stream: stream, Prefix: prefix})
@@ -596,9 +538,6 @@ func TestSourceNonOwnerReceives(t *testing.T) {
 	}
 }
 
-// Shutdown waits on the drain until ctx ends, then closes the connection
-// and returns ctx's error. The native handle's subscription, whose handler
-// is still running, holds the drain open.
 func TestShutdownClosesWhenCtxEnds(t *testing.T) {
 	b, _, _, prefix := ownerBroker(t)
 	nc := b.Conn()
@@ -631,9 +570,6 @@ func TestShutdownClosesWhenCtxEnds(t *testing.T) {
 	}
 }
 
-// forward relays the server at rawURL over loopback, so a test can sever
-// the server and restore it without stopping the shared one, and returns
-// the forwarder and the URL it serves.
 func forward(t *testing.T, rawURL string) (*processtest.Forwarder, string) {
 	t.Helper()
 	u, err := neturl.Parse(rawURL)
@@ -644,9 +580,6 @@ func forward(t *testing.T, rawURL string) (*processtest.Forwarder, string) {
 	return f, "nats://" + f.Addr()
 }
 
-// While the server is unreachable, the source reports each pull that fails
-// and reports not ready; once it is back, the reports stop, the source is
-// ready again, and it delivers.
 func TestSourceReportsOutage(t *testing.T) {
 	url := natstest.Open(t)
 	stream, prefix := natstest.Scratch(t, url)
@@ -680,8 +613,6 @@ func TestSourceReportsOutage(t *testing.T) {
 	f.Restore(t)
 	eventually(t, "the source to be ready again", src.Ready)
 	settled := len(r.seen())
-	// Two pulls' time, a pull's bound and its retry wait each: a source
-	// still failing would report in it.
 	time.Sleep(2 * (time.Second + 100*time.Millisecond))
 	if after := r.seen(); len(after) != settled {
 		t.Errorf("reports went on after the source was ready again: %v", after[settled:])

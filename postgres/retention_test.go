@@ -7,14 +7,11 @@ import (
 	"github.com/standards-lab/go-messaging/postgres"
 )
 
-// retentions are the constructors under test, by table.
 var retentions = map[string]func(time.Duration) (*postgres.Retention, error){
 	"outbox": func(age time.Duration) (*postgres.Retention, error) { return postgres.OutboxRetention(nil, age) },
 	"inbox":  func(age time.Duration) (*postgres.Retention, error) { return postgres.InboxRetention(nil, age) },
 }
 
-// An age that is not positive would delete rows as soon as they qualify,
-// so both constructors refuse it.
 func TestRetentionRefusesAnAgeThatIsNotPositive(t *testing.T) {
 	for table, build := range retentions {
 		for _, age := range []time.Duration{0, -time.Hour} {
@@ -28,8 +25,6 @@ func TestRetentionRefusesAnAgeThatIsNotPositive(t *testing.T) {
 	}
 }
 
-// A pass refuses a budget below 1 before it reaches the session, which is
-// nil here.
 func TestPassRefusesABudgetBelowOne(t *testing.T) {
 	for table, build := range retentions {
 		r, err := build(time.Hour)

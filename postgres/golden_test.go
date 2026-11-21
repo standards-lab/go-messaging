@@ -8,13 +8,6 @@ import (
 	"github.com/standards-lab/go-messaging/postgres"
 )
 
-// released pins every migration as Migrations returns it: its name, the
-// sha256 of its up and down texts, and whether it runs in a transaction. A
-// released migration never changes: a new migration adds a row here, and a
-// changed row is a breaking change to the schema's version line. The texts
-// are the files' bodies without their "--|" header, which Transactional
-// carries. 0001 is released in v0.1.0; 0002 and 0003, the retentions'
-// indexes, built CONCURRENTLY outside a transaction, in v0.2.0.
 var released = map[int]struct {
 	name, up, down string
 	transactional  bool
@@ -24,16 +17,11 @@ var released = map[int]struct {
 	3: {"inbox_handled", "6d2d5113c6108e06275876ed1eaabd3eccbc8d74a0b99ad6dd71406460769dbc", "355af6d52dd1a31e367ca64ea6cc6a6141132b5e8ef36fd3ffe69654930ca69f", false},
 }
 
-// sum is the hex sha256 of text.
 func sum(text string) string {
 	h := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(h[:])
 }
 
-// TestReleasedMigrations checks the migration set against the pins: a
-// released migration whose text, name, or transaction changed, a migration
-// the table does not list, and a listed migration missing from the set are
-// each a failure.
 func TestReleasedMigrations(t *testing.T) {
 	set, err := postgres.Migrations()
 	if err != nil {

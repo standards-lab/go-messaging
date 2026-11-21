@@ -22,10 +22,8 @@ import (
 	"github.com/standards-lab/go-messaging/nats/natstest"
 )
 
-// failsafe bounds each server call a test makes.
 const failsafe = 10 * time.Second
 
-// newConfigured builds a broker on cfg, named for the test.
 func newConfigured(t *testing.T, cfg nats.Config) *nats.Broker {
 	t.Helper()
 	cfg.Name = t.Name()
@@ -36,7 +34,6 @@ func newConfigured(t *testing.T, cfg nats.Config) *nats.Broker {
 	return b
 }
 
-// started builds and starts a broker on cfg, shut down when the test ends.
 func started(t *testing.T, cfg nats.Config) *nats.Broker {
 	t.Helper()
 	b := newConfigured(t, cfg)
@@ -49,7 +46,6 @@ func started(t *testing.T, cfg nats.Config) *nats.Broker {
 	return b
 }
 
-// shutdown registers b's Shutdown as a cleanup.
 func shutdown(t *testing.T, b *nats.Broker) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -61,8 +57,6 @@ func shutdown(t *testing.T, b *nats.Broker) {
 	})
 }
 
-// jetStream is a JetStream context on its own connection to url, closed when
-// the test ends, so the test inspects the server independently of a broker.
 func jetStream(t *testing.T, url string) jetstream.JetStream {
 	t.Helper()
 	nc, err := natsgo.Connect(url, natsgo.Name(t.Name()))
@@ -77,7 +71,6 @@ func jetStream(t *testing.T, url string) jetstream.JetStream {
 	return js
 }
 
-// streamInfo is the stream's current configuration and state.
 func streamInfo(t *testing.T, js jetstream.JetStream, name string) *jetstream.StreamInfo {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
@@ -93,7 +86,6 @@ func streamInfo(t *testing.T, js jetstream.JetStream, name string) *jetstream.St
 	return info
 }
 
-// createStream creates the stream by hand, as another deployment would.
 func createStream(t *testing.T, js jetstream.JetStream, name string, subjects ...string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
@@ -103,7 +95,6 @@ func createStream(t *testing.T, js jetstream.JetStream, name string, subjects ..
 	}
 }
 
-// publish publishes e through b, failing the test on an error.
 func publish(t *testing.T, b *nats.Broker, e event.Event) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
@@ -113,8 +104,6 @@ func publish(t *testing.T, b *nats.Broker, e event.Event) {
 	}
 }
 
-// TestBrokerStarts proves Start connects to the compose server, and that
-// Shutdown drains and closes the connection it opened.
 func TestBrokerStarts(t *testing.T) {
 	url := natstest.Open(t)
 	stream, prefix := natstest.Scratch(t, url)
@@ -138,9 +127,6 @@ func TestBrokerStarts(t *testing.T) {
 	}
 }
 
-// The owner provisions the stream with file storage, limits retention, the
-// subjects Prefix.>, its deduplication window, and its MaxAge; a window of 0
-// is DefaultDuplicates, and a MaxAge of 0 keeps every event.
 func TestOwnerProvisionsRetention(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -176,8 +162,6 @@ func TestOwnerProvisionsRetention(t *testing.T) {
 	}
 }
 
-// A second owner on the stream, as a redeploy with a new configuration
-// starts, converges the stream on its own configuration.
 func TestSecondOwnerConverges(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -196,8 +180,6 @@ func TestSecondOwnerConverges(t *testing.T) {
 	}
 }
 
-// A non-owner binds the owner's stream without changing its configuration,
-// and the events either publishes land in the one stream.
 func TestNonOwnerBinds(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -233,10 +215,6 @@ func TestNonOwnerBinds(t *testing.T) {
 	}
 }
 
-// A non-owner binds a stream one of whose subjects captures every subject
-// under its prefix, by NATS's wildcard rules: '*' one token, a final '>' one
-// or more. Each stream's subjects sit under the scratch prefix, so no two
-// tests' streams overlap; the broker's prefix is two tokens below it.
 func TestNonOwnerBindsCapturingSubject(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -265,9 +243,6 @@ func TestNonOwnerBindsCapturingSubject(t *testing.T) {
 	}
 }
 
-// A non-owner's Start fails when its stream is missing, creates nothing,
-// leaves the broker unstarted, and succeeds once the owner has provisioned
-// the stream.
 func TestNonOwnerStartFailsOnMissingStream(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -298,9 +273,6 @@ func TestNonOwnerStartFailsOnMissingStream(t *testing.T) {
 	}
 }
 
-// A non-owner's Start fails on a stream none of whose subjects captures
-// every subject under its prefix, laid out as in
-// TestNonOwnerBindsCapturingSubject.
 func TestNonOwnerStartFailsOnUncapturedPrefix(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -338,8 +310,6 @@ func TestNonOwnerStartFailsOnUncapturedPrefix(t *testing.T) {
 	}
 }
 
-// A started broker starts once: a second Start fails with ErrStarted and
-// leaves the first connection serving.
 func TestSecondStartFails(t *testing.T) {
 	url := natstest.Open(t)
 	stream, prefix := natstest.Scratch(t, url)
@@ -353,10 +323,6 @@ func TestSecondStartFails(t *testing.T) {
 	}
 }
 
-// Publish sends an event in binary content mode with its type as the
-// subject, keyed by its length-prefixed source and id, so a repeat within
-// the window is dropped, and a source and id that spell the same
-// concatenation are not.
 func TestPublishDedups(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -398,10 +364,6 @@ func TestPublishDedups(t *testing.T) {
 	}
 }
 
-// A started broker's Publish refuses, as permanent, an event whose type is
-// not under the prefix, naming the type and the prefix, and the stream
-// holds nothing of it; a type under the prefix publishes on the same
-// broker.
 func TestStartedPublishRefusesTypeOutsidePrefix(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)

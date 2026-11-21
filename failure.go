@@ -56,7 +56,6 @@ type Failure struct {
 	Err error
 }
 
-// identify fills f's event identity from e.
 func (f Failure) identify(e event.Event) Failure {
 	f.EventSource, f.EventID, f.EventType = e.Source, e.ID, e.Type
 	return f
@@ -67,9 +66,6 @@ func (f Failure) identify(e event.Event) Failure {
 // consumer wait on it before they go on.
 type Hook func(ctx context.Context, f Failure)
 
-// logFailures returns the default hook: each failure logged at warn on
-// logger as "messaging failure", with its kind, the consumer and the
-// event's identity when known, the attempt when one is, and the error.
 func logFailures(logger *slog.Logger) Hook {
 	return func(ctx context.Context, f Failure) {
 		attrs := []any{"kind", string(f.Kind)}
@@ -86,9 +82,6 @@ func logFailures(logger *slog.Logger) Hook {
 	}
 }
 
-// relayFailure classifies err, an error the relay reported: a quarantine
-// as [FailureQuarantine], and a publish failure or a database error as
-// [FailureRelay], with the event's identity when the relay knew it.
 func relayFailure(err error) Failure {
 	if q, ok := errors.AsType[*outbox.QuarantineError](err); ok {
 		return Failure{Kind: FailureQuarantine, Err: err}.identify(q.Event)

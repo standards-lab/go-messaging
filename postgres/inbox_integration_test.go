@@ -21,12 +21,8 @@ import (
 	"github.com/standards-lab/sqlate"
 )
 
-// claim claims e for consumer in a transaction of its own, rolling it back
-// when rollback is set.
 func claim(t *testing.T, db *sqlate.DB, consumer string, e event.Event, rollback bool) bool {
 	t.Helper()
-	// Transact returns the zero value with an error, so the claim's result
-	// leaves the transaction through first.
 	undo := errors.New("roll back")
 	var first bool
 	_, err := sqlate.Transact(t.Context(), db, func(tx *sqlate.Tx) (struct{}, error) {
@@ -96,12 +92,6 @@ func TestClaimRequiresAConsumer(t *testing.T) {
 	}
 }
 
-// A handler that outlives AckWait holds its claim only until its context's
-// deadline, which is the delivery's AckWait: the deadline rolls its
-// transaction back, so the redelivery, to another member of the group,
-// claims the event and does the work once. The redelivery's claim waits on
-// the first handler's row lock rather than failing, and under READ
-// COMMITTED proceeds once the lock is released.
 func TestClaimAcrossAckWait(t *testing.T) {
 	db := migrated(t)
 	b := memory.New()
@@ -126,7 +116,7 @@ func TestClaimAcrossAckWait(t *testing.T) {
 				return struct{}{}, nil
 			}
 			if n == 1 {
-				<-ctx.Done() // overrun AckWait, holding the claim
+				<-ctx.Done()
 				return struct{}{}, ctx.Err()
 			}
 			mu.Lock()
@@ -166,10 +156,6 @@ func TestClaimAcrossAckWait(t *testing.T) {
 	}
 }
 
-// A consumer the runtime builds claims each event under its subscription's
-// name, in the consumer's own transaction: the claim it hands over is
-// first once for the delivered event, and the inbox holds that consumer
-// and event.
 func TestConsumeClaimsUnderTheSubscription(t *testing.T) {
 	db := migrated(t)
 	b := memory.New()
@@ -226,9 +212,6 @@ func TestConsumeClaimsUnderTheSubscription(t *testing.T) {
 	}
 }
 
-// The runtime logs the traffic it carries: the relay each event it
-// publishes, and a consumer each delivery with its outcome, so a delivery
-// of an event the inbox already holds is logged as a repeat.
 func TestRuntimeLogsTheTraffic(t *testing.T) {
 	db := migrated(t)
 	b := memory.New()
@@ -261,8 +244,6 @@ func TestRuntimeLogsTheTraffic(t *testing.T) {
 		t.Cleanup(func() { stop(r) })
 	}
 
-	// The inbox already holds 2, as it would once a delivery of 2 had
-	// committed, so its delivery is a repeat.
 	claim(t, db, sub.Name, tick("2"), false)
 	emit(t, db, tick("1"), tick("2"))
 	await(t, handled)
@@ -280,7 +261,6 @@ func TestRuntimeLogsTheTraffic(t *testing.T) {
 	}
 }
 
-// await waits for a delivery on ch, within the failsafe.
 func await(t *testing.T, ch <-chan event.Event) {
 	t.Helper()
 	select {
@@ -290,7 +270,6 @@ func await(t *testing.T, ch <-chan event.Event) {
 	}
 }
 
-// lockedBuffer serializes the reactors' writes and the test's read.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

@@ -16,7 +16,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats"
 )
 
-// closedURL is a NATS URL on a loopback port nothing listens on.
 func closedURL(t *testing.T) string {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -39,10 +38,6 @@ func newBroker(t *testing.T, url string) *nats.Broker {
 	return b
 }
 
-// Before Start, the broker is not ready and has no connection, and a
-// publish or a receive fails rather than reach a connection that does not
-// exist; the coordinator's stage order keeps both from happening in a
-// process.
 func TestBrokerBeforeStart(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	if b.Ready() {
@@ -71,7 +66,6 @@ func TestBrokerBeforeStart(t *testing.T) {
 	}
 }
 
-// Subscribe validates the subscription.
 func TestBrokerSubscribeValidates(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	for name, sub := range map[string]messaging.Subscription{
@@ -86,8 +80,6 @@ func TestBrokerSubscribeValidates(t *testing.T) {
 	}
 }
 
-// A broker whose server is unreachable fails its Start, which fails the
-// process's startup, stays not ready, and can start again.
 func TestBrokerStartFailsWithoutNATS(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -103,9 +95,6 @@ func TestBrokerStartFailsWithoutNATS(t *testing.T) {
 	}
 }
 
-// A Start while another is in progress fails with ErrStarted. The server is
-// a listener that accepts and never speaks, so the first Start waits for its
-// deadline.
 func TestBrokerStartWhileStarting(t *testing.T) {
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -140,8 +129,6 @@ func TestBrokerStartWhileStarting(t *testing.T) {
 	}
 }
 
-// Publish rejects an event messaging.Encode rejects, and a header value the
-// NATS protocol cannot carry, before it needs a connection.
 func TestPublishRejects(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	for name, e := range map[string]event.Event{
@@ -159,9 +146,6 @@ func TestPublishRejects(t *testing.T) {
 	}
 }
 
-// Publish refuses a type that is not under the prefix as permanent, naming
-// the type and the prefix, before it needs a connection: the prefix itself,
-// and a type whose first token only starts with the prefix, are outside it.
 func TestPublishRefusesTypeOutsidePrefix(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	for _, typ := range []string{"orders.created", "test", "testing.created", "other.test.created"} {
@@ -182,8 +166,6 @@ func TestPublishRefusesTypeOutsidePrefix(t *testing.T) {
 	}
 }
 
-// Subscribe refuses a subscription naming a type that is not under the
-// prefix, which the stream never captures, naming the type and the prefix.
 func TestSubscribeRefusesTypeOutsidePrefix(t *testing.T) {
 	b := newBroker(t, closedURL(t))
 	for _, typ := range []string{"orders.created", "test", "testing.created"} {

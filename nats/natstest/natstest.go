@@ -57,8 +57,6 @@ func Scratch(t testing.TB, url string) (stream, prefix string) {
 	return stream, prefix
 }
 
-// suffix returns eight random hex characters, so parallel packages never
-// pick the same stream.
 func suffix(t testing.TB) string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {

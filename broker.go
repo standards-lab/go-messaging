@@ -72,8 +72,6 @@ type Broker interface {
 // for long, since the source waits on it before its next delivery.
 type Report func(ctx context.Context, err error)
 
-// attemptKey is the context key under which a provider puts a delivery's
-// attempt on its handler's context.
 type attemptKey struct{}
 
 // WithAttempt returns ctx carrying attempt, the number of the delivery its

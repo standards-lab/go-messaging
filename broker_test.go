@@ -69,8 +69,6 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// Normalize defaults AckWait and puts Types in one order without repeats,
-// so subscriptions that mean the same thing compare equal.
 func TestNormalize(t *testing.T) {
 	a := messaging.Subscription{Name: "n", Types: []string{"b", "a", "a"}}.Normalize()
 	b := messaging.Subscription{Name: "n", Types: []string{"a", "b"}, AckWait: messaging.DefaultAckWait}.Normalize()
@@ -82,8 +80,6 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-// The attempt a provider puts on a context reads back; a context no
-// provider gave reads 0.
 func TestAttempt(t *testing.T) {
 	if got := messaging.Attempt(context.Background()); got != 0 {
 		t.Errorf("Attempt of a bare context = %d, want 0", got)
@@ -93,8 +89,6 @@ func TestAttempt(t *testing.T) {
 	}
 }
 
-// Encode rejects an event that event.Encode rejects, and one whose type a
-// broker cannot route.
 func TestEncode(t *testing.T) {
 	if _, _, err := messaging.Encode(event.Event{ID: "1", Source: "/t", Type: "a.b"}); err != nil {
 		t.Errorf("Encode of a valid event: %v", err)

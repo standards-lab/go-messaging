@@ -29,7 +29,6 @@ const (
 	failsafe = 10 * time.Second
 )
 
-// recorder keeps the ids of the events a handler saw, in order.
 type recorder struct {
 	mu  sync.Mutex
 	ids []string
@@ -52,8 +51,6 @@ func (r *recorder) record(_ context.Context, e event.Event) error {
 	return nil
 }
 
-// relay starts a reactor over a new relay on db and shuts it down when the
-// test ends, unless the test stops it first.
 func relay(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event], opts reactor.Options) *reactor.Reactor[event.Event] {
 	t.Helper()
 	r := reactor.New(ob.Relay(db, poll, outbox.RelayOptions{}), fn, opts)
@@ -64,8 +61,6 @@ func relay(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event], opts react
 	return r
 }
 
-// observe subscribes a recorder to b, so a test sees what the relay
-// published.
 func observe(t *testing.T, b *memory.Broker) *recorder {
 	t.Helper()
 	src, err := b.Subscribe(messaging.Subscription{Name: "observer"}, nil)
@@ -81,8 +76,6 @@ func observe(t *testing.T, b *memory.Broker) *recorder {
 	return rec
 }
 
-// stop shuts r down within the failsafe, so a failing test's cleanup
-// cannot hang on a handler that never returns.
 func stop(r *reactor.Reactor[event.Event]) {
 	ctx, cancel := context.WithTimeout(context.Background(), failsafe)
 	defer cancel()
@@ -137,10 +130,6 @@ func TestRelayPublishesInEmissionOrder(t *testing.T) {
 	eventually(t, "no pending rows", drained(t, db))
 }
 
-// Evidence 2: a stop between commit and publish loses no event. Events 1 and
-// 2 are committed while no relay runs. A first relay is stopped with event 3
-// in flight, its publish cancelled after the grace. Event 4 is committed
-// while no relay runs again. A second relay then publishes all four.
 func TestStopBetweenCommitAndPublishLosesNoEvent(t *testing.T) {
 	db := migrated(t)
 	b := memory.New()
@@ -151,7 +140,7 @@ func TestStopBetweenCommitAndPublishLosesNoEvent(t *testing.T) {
 	first := relay(t, db, func(ctx context.Context, e event.Event) error {
 		if e.ID == "3" {
 			close(entered)
-			<-ctx.Done() // a publish that never completes
+			<-ctx.Done()
 			return ctx.Err()
 		}
 		return b.Publish(ctx, e)
@@ -197,9 +186,6 @@ func TestFailedPublishIsRetriedInOrder(t *testing.T) {
 	eventually(t, "no pending rows", drained(t, db))
 }
 
-// A publish that reaches the broker but whose row is never marked, as when
-// the process stops between the two, is published again under the same id,
-// and the broker's deduplication on the id delivers it once.
 func TestPublishedButUnmarkedIsRepublished(t *testing.T) {
 	db := migrated(t)
 	b := memory.New()
@@ -249,7 +235,6 @@ func TestRelaysPublishEachRowOnce(t *testing.T) {
 	}
 }
 
-// watched is a source that reports when its Receive context ends.
 type watched struct {
 	reactor.Source[event.Event]
 	stopped chan struct{}
@@ -277,7 +262,7 @@ func TestShutdownSettlesTheRowInFlight(t *testing.T) {
 	<-entered
 	done := make(chan error, 1)
 	go func() { done <- r.Shutdown(t.Context()) }()
-	<-src.stopped // the source's context has ended with the handler in flight
+	<-src.stopped
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("shutdown: %v", err)
@@ -287,7 +272,6 @@ func TestShutdownSettlesTheRowInFlight(t *testing.T) {
 	}
 }
 
-// reports keeps the errors a relay reported, in order.
 type reports struct {
 	mu   sync.Mutex
 	errs []error
@@ -305,8 +289,6 @@ func (r *reports) all() []error {
 	return slices.Clone(r.errs)
 }
 
-// reporting starts a reactor over a new relay on db that reports to the
-// returned reports, and shuts it down when the test ends.
 func reporting(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event]) (*reactor.Reactor[event.Event], *reports) {
 	t.Helper()
 	rep := &reports{}
@@ -318,8 +300,6 @@ func reporting(t *testing.T, db *sqlate.DB, fn reactor.Func[event.Event]) (*reac
 	return r, rep
 }
 
-// quarantined reads the quarantine of the outbox row with id: whether it is
-// quarantined, why, and whether it was published.
 func quarantined(t *testing.T, db *sqlate.DB, id string) (at bool, reason string, published bool) {
 	t.Helper()
 	r, err := db.QueryContext(t.Context(),
@@ -337,9 +317,6 @@ func quarantined(t *testing.T, db *sqlate.DB, id string) (at bool, reason string
 	return at, reason, published
 }
 
-// quarantine waits for the relay's one report, which must be a
-// *outbox.QuarantineError, and checks it against the row it names: the row
-// is quarantined with the reported reason and unpublished.
 func quarantine(t *testing.T, db *sqlate.DB, rep *reports, id string) *outbox.QuarantineError {
 	t.Helper()
 	eventually(t, "the quarantine's report", func() bool { return len(rep.all()) > 0 })
@@ -356,9 +333,6 @@ func quarantine(t *testing.T, db *sqlate.DB, rep *reports, id string) *outbox.Qu
 	return q
 }
 
-// A row that does not decode is quarantined with its reason, the pass goes
-// on to the next row, and Pending no longer counts it: the relay keeps
-// publishing rather than end on it.
 func TestCorruptRowIsQuarantined(t *testing.T) {
 	for name, tc := range map[string]struct{ header, reason string }{
 		"a header that does not decode": {`{"ce-id": "c"}`, "header does not decode: "},
@@ -383,8 +357,6 @@ func TestCorruptRowIsQuarantined(t *testing.T) {
 	}
 }
 
-// A publish that fails with a permanent error quarantines its row after one
-// attempt, and the next row publishes.
 func TestPermanentFailureIsQuarantined(t *testing.T) {
 	db := migrated(t)
 	emitEach(t, db, "1", "2")
@@ -410,8 +382,6 @@ func TestPermanentFailureIsQuarantined(t *testing.T) {
 	assertNothingPending(t, db, r)
 }
 
-// assertNothingPending checks that a relay that quarantined a row stays
-// ready with nothing pending, by Pending as by the test's own count.
 func assertNothingPending(t *testing.T, db *sqlate.DB, r *reactor.Reactor[event.Event]) {
 	t.Helper()
 	eventually(t, "no pending rows", drained(t, db))
@@ -432,9 +402,6 @@ func assertNothingPending(t *testing.T, db *sqlate.DB, r *reactor.Reactor[event.
 	}
 }
 
-// A pass that cannot reach the outbox makes the relay not ready until a pass
-// succeeds again. Renaming the table stands in for a database the relay
-// cannot use.
 func TestDatabaseErrorMakesTheRelayNotReady(t *testing.T) {
 	db := migrated(t)
 	rec := &recorder{}
@@ -452,8 +419,6 @@ func TestDatabaseErrorMakesTheRelayNotReady(t *testing.T) {
 	eventually(t, "event 1", func() bool { return slices.Equal(rec.seen(), []string{"1"}) })
 }
 
-// A handler that outlives Timeout sees its context end, and the row is
-// retried.
 func TestTimeoutEndsAHungHandler(t *testing.T) {
 	db := migrated(t)
 	emitEach(t, db, "1")
@@ -482,8 +447,6 @@ func TestTimeoutEndsAHungHandler(t *testing.T) {
 	eventually(t, "no pending rows", drained(t, db))
 }
 
-// A handler that ignores its deadline cannot hold the row past twice
-// Timeout: the transaction rolls back and the row is published again.
 func TestTransactionBoundOutlastsAHandlerThatIgnoresItsDeadline(t *testing.T) {
 	db := migrated(t)
 	emitEach(t, db, "1")
@@ -493,7 +456,7 @@ func TestTransactionBoundOutlastsAHandlerThatIgnoresItsDeadline(t *testing.T) {
 	relay := reactor.New[event.Event](ob.Relay(db, poll, outbox.RelayOptions{Timeout: timeout}),
 		func(ctx context.Context, e event.Event) error {
 			rec.add(e.ID)
-			once.Do(func() { time.Sleep(3 * timeout) }) // ignores ctx
+			once.Do(func() { time.Sleep(3 * timeout) })
 			return nil
 		}, reactor.Options{})
 	if err := relay.Start(t.Context()); err != nil {
@@ -506,8 +469,6 @@ func TestTransactionBoundOutlastsAHandlerThatIgnoresItsDeadline(t *testing.T) {
 	}
 }
 
-// An engine whose mark changes no row is refused at the mark, so the row
-// is never committed as published by a statement that did not mark it.
 func TestMarkThatChangesNoRowFailsThePass(t *testing.T) {
 	db := migrated(t)
 	emitEach(t, db, "1")
@@ -536,9 +497,6 @@ func compileMark(t *testing.T, text string) query.Statement {
 	return query.MustCatalog(query.Patterns()).MustCompile(fsys, "s", pgdialect.Dialect{}).Statement("mark_published")
 }
 
-// A relay with a Drain publishes, on its way out, the rows committed while
-// it slept between passes, as a producer's last commits during a drain are.
-// Without one it leaves them for the next start.
 func TestDrainPublishesWhatWasCommittedBeforeTheStop(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -557,7 +515,7 @@ func TestDrainPublishesWhatWasCommittedBeforeTheStop(t *testing.T) {
 				t.Fatal(err)
 			}
 			eventually(t, "the relay's first pass", r.Ready)
-			time.Sleep(50 * time.Millisecond) // the first pass found nothing; the relay sleeps for an hour
+			time.Sleep(50 * time.Millisecond)
 			emitEach(t, db, "1", "2", "3")
 			if err := r.Shutdown(t.Context()); err != nil {
 				t.Fatalf("shutdown: %v", err)

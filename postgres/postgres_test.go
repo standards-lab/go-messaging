@@ -8,8 +8,6 @@ import (
 	"github.com/standards-lab/go-messaging/postgres"
 )
 
-// The engine defines every statement with the parameters the outbox and the
-// inbox name.
 func TestEnginesAreComplete(t *testing.T) {
 	if _, err := outbox.New(postgres.Outbox()); err != nil {
 		t.Fatal(err)
@@ -29,9 +27,6 @@ func TestMigrationsName(t *testing.T) {
 	}
 }
 
-// Every statement that writes declares its transaction: the relay's claim,
-// mark, and quarantine run on its own, and the sink's and the inbox's on the
-// command's. The count and the retentions' deletes run on a pool.
 func TestStatementsDeclareTheirTransaction(t *testing.T) {
 	want := map[string]bool{
 		"claim_inbox":    true,

@@ -11,8 +11,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats"
 )
 
-// Each unusable config fails Validate and New, with an error naming what is
-// wrong with it.
 func TestConfigValidateRejects(t *testing.T) {
 	owner := new(true)
 	for name, tc := range map[string]struct {
@@ -45,8 +43,6 @@ func TestConfigValidateRejects(t *testing.T) {
 	}
 }
 
-// The owner sets the stream's configuration, a positive MaxAge at least its
-// deduplication window; a non-owner sets none of it.
 func TestConfigValidateAccepts(t *testing.T) {
 	for name, cfg := range map[string]nats.Config{
 		"non-owner":            {URL: "u", Stream: "s", Prefix: "p.q"},
@@ -62,8 +58,6 @@ func TestConfigValidateAccepts(t *testing.T) {
 	}
 }
 
-// Merge overlays each set field, an Owner set to false included, and leaves
-// the rest.
 func TestConfigMerge(t *testing.T) {
 	cfg := nats.Config{URL: "base", Name: "base", Stream: "base", Prefix: "base", Owner: new(true), Duplicates: 1, MaxAge: 1}
 	cfg.Merge(nil)
@@ -87,8 +81,6 @@ func TestConfigMerge(t *testing.T) {
 	}
 }
 
-// Finalize fills the default URL and validates; with no prefix it reads no
-// environment, and an absent Owner is not the owner.
 func TestConfigFinalizeDefaults(t *testing.T) {
 	t.Setenv("NATS_URL", "nats://elsewhere:4222")
 	cfg := nats.Config{Stream: "s", Prefix: "p"}
@@ -108,8 +100,6 @@ func TestConfigFinalizeDefaults(t *testing.T) {
 	}
 }
 
-// Finalize applies the block's environment overrides over the merged file
-// values, then validates.
 func TestConfigFinalizeEnv(t *testing.T) {
 	cfg := nats.Config{Stream: "file", Prefix: "file"}
 	cfg.Merge(&nats.Config{Stream: "overlay", Name: "overlay"})
@@ -131,16 +121,12 @@ func TestConfigFinalizeEnv(t *testing.T) {
 		t.Errorf("Finalize = %+v, want %+v", cfg, want)
 	}
 
-	// SVC_NATS_OWNER=false makes the config a non-owner, which its
-	// environment's MaxAge then fails.
 	t.Setenv("SVC_NATS_OWNER", "false")
 	if err := cfg.Finalize("svc"); err == nil || !strings.Contains(err.Error(), "max_age") {
 		t.Errorf("Finalize = %v, want a non-owner's max_age rejected", err)
 	}
 }
 
-// An override that doesn't parse, or one that fails validation, fails
-// Finalize, naming the variable or the field.
 func TestConfigFinalizeEnvRejects(t *testing.T) {
 	for name, tc := range map[string]struct {
 		key, value, want string

@@ -28,8 +28,6 @@ import (
 
 const failsafe = 2 * time.Second
 
-// engines compiles the outbox's and the inbox's statements over sqlate's
-// test dialect, so the runtime is built without a driver.
 func engines(t *testing.T) (outbox.Engine, inbox.Engine) {
 	t.Helper()
 	fsys := fstest.MapFS{}
@@ -51,7 +49,6 @@ func engines(t *testing.T) (outbox.Engine, inbox.Engine) {
 	}, inbox.Engine{Claim: s.Statement("claim")}
 }
 
-// config is a finalized configuration with the source /test.
 func config(t *testing.T) messaging.Config {
 	t.Helper()
 	cfg := messaging.Config{Source: "/test"}
@@ -61,16 +58,12 @@ func config(t *testing.T) messaging.Config {
 	return cfg
 }
 
-// setup is a Setup that builds: over b, the test engines, a finalized
-// configuration, a one-second drain timeout, and logger, with no hook and no
-// gate.
 func setup(t *testing.T, b messaging.Broker, logger *slog.Logger) messaging.Setup {
 	t.Helper()
 	ob, in := engines(t)
 	return messaging.Setup{Config: config(t), Broker: b, Outbox: ob, Inbox: in, Shutdown: time.Second, Logger: logger}
 }
 
-// build builds s, failing the test on an error.
 func build(t *testing.T, s messaging.Setup) *messaging.Runtime {
 	t.Helper()
 	rt, err := s.Build()
@@ -80,9 +73,6 @@ func build(t *testing.T, s messaging.Setup) *messaging.Runtime {
 	return rt
 }
 
-// Build refuses an engine that is missing a statement, a configuration that
-// is not finalized, and a drain timeout that is not positive, each with an
-// error naming what it refused.
 func TestBuildChecksItsInputs(t *testing.T) {
 	for name, tc := range map[string]struct {
 		change func(*messaging.Setup)
@@ -111,8 +101,6 @@ func TestBuildChecksItsInputs(t *testing.T) {
 	}
 }
 
-// Build panics naming a nil Broker or Logger before it checks anything
-// else, so a Setup that is also invalid otherwise still panics.
 func TestBuildPanicsOnANilBrokerOrLogger(t *testing.T) {
 	for name, tc := range map[string]struct {
 		change func(*messaging.Setup)
@@ -139,12 +127,6 @@ type payload struct {
 	N int `json:"n"`
 }
 
-// Consume decodes each event's data into the consumer's type and hands it
-// over with a claim; an event whose data does not decode never reaches the
-// consumer and is not redelivered, and neither is one the consumer refuses
-// permanently, so the next event still arrives. Each delivery is logged
-// once with its outcome: a refusal at warn with its error, a failure the
-// broker redelivers as retried, and a success as handled.
 func TestConsume(t *testing.T) {
 	b := memory.New()
 	var log syncBuffer
@@ -241,7 +223,6 @@ func TestConsume(t *testing.T) {
 	}
 }
 
-// failures collects what a runtime's hook is given.
 type failures struct {
 	mu  sync.Mutex
 	got []messaging.Failure
@@ -259,7 +240,6 @@ func (f *failures) all() []messaging.Failure {
 	return slices.Clone(f.got)
 }
 
-// waitFor fails the test unless cond holds within the failsafe.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(failsafe)
@@ -271,7 +251,6 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// start starts r and shuts it down when the test ends.
 func start(t *testing.T, r *reactor.Reactor[event.Event]) {
 	t.Helper()
 	if err := r.Start(context.Background()); err != nil {
@@ -280,9 +259,6 @@ func start(t *testing.T, r *reactor.Reactor[event.Event]) {
 	t.Cleanup(func() { _ = r.Shutdown(context.Background()) })
 }
 
-// consume builds a runtime over b whose failures go to f, and starts a
-// consumer of sub over it whose handler fails each delivery with the error
-// fail gives for its attempt, sending the attempt on the channel returned.
 func consume(t *testing.T, b messaging.Broker, f *failures, sub messaging.Subscription, fail func(attempt int) error) <-chan int {
 	t.Helper()
 	s := setup(t, b, slog.New(slog.DiscardHandler))
@@ -301,11 +277,8 @@ func consume(t *testing.T, b messaging.Broker, f *failures, sub messaging.Subscr
 	return attempts
 }
 
-// event1 is the event the consumer tests publish.
 var event1 = event.Event{ID: "e1", Source: "/test", Type: "t", DataContentType: "application/json", Data: []byte(`{"n":1}`)}
 
-// awaitAttempts fails the test unless the handler is called on exactly the
-// attempts want, in order, and then no more within a short wait.
 func awaitAttempts(t *testing.T, attempts <-chan int, want ...int) {
 	t.Helper()
 	var got []int
@@ -327,8 +300,6 @@ func awaitAttempts(t *testing.T, attempts <-chan int, want ...int) {
 	}
 }
 
-// An event whose handler fails every delivery is reported once, as
-// exhausted, on the last delivery the subscription allows.
 func TestExhaustionIsReportedOnceOnTheLastAttempt(t *testing.T) {
 	b := memory.New()
 	var f failures
@@ -353,8 +324,6 @@ func TestExhaustionIsReportedOnceOnTheLastAttempt(t *testing.T) {
 	}
 }
 
-// A permanent refusal on the last delivery is the handler's own verdict,
-// which the refusal's log line reports, so it is not an exhaustion.
 func TestPermanentRefusalOnTheLastAttemptIsNotExhaustion(t *testing.T) {
 	b := memory.New()
 	var f failures
@@ -374,9 +343,6 @@ func TestPermanentRefusalOnTheLastAttemptIsNotExhaustion(t *testing.T) {
 	}
 }
 
-// fakeBroker is a broker whose Subscribe returns src and keeps the report
-// it was given, and whose Publish fails each event fail names, recording
-// each publish context's deadline.
 type fakeBroker struct {
 	src  reactor.Source[event.Event]
 	fail map[string]error
@@ -401,8 +367,6 @@ func (b *fakeBroker) Publish(ctx context.Context, e event.Event) error {
 	return b.fail[e.ID]
 }
 
-// source delivers events once each on a context with no attempt, then
-// waits for ctx to end.
 type source struct {
 	events []event.Event
 }
@@ -417,8 +381,6 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 
 func (s *source) Ready() bool { return true }
 
-// The errors a consumer's source survives reach the hook as source
-// failures under the consumer's name.
 func TestSourceFailuresReachTheHook(t *testing.T) {
 	b := &fakeBroker{src: &source{}}
 	var f failures
@@ -435,8 +397,6 @@ func TestSourceFailuresReachTheHook(t *testing.T) {
 	}
 }
 
-// A provider that gives no attempt never exhausts an unlimited
-// subscription: Attempt's 0 is not a MaxDeliver of 0.
 func TestNoAttemptIsNoExhaustion(t *testing.T) {
 	b := &fakeBroker{src: &source{events: []event.Event{event1}}}
 	var f failures
@@ -447,9 +407,6 @@ func TestNoAttemptIsNoExhaustion(t *testing.T) {
 	}
 }
 
-// exhaust builds a runtime from s and starts a consumer over it, with a
-// MaxDeliver of 1, whose handler fails, then publishes event1 to b, so
-// the event is reported once as exhausted.
 func exhaust(t *testing.T, s messaging.Setup, b messaging.Broker) {
 	t.Helper()
 	rt := build(t, s)
@@ -465,8 +422,6 @@ func exhaust(t *testing.T, s messaging.Setup, b messaging.Broker) {
 	}
 }
 
-// Without a hook, each failure is logged once at warn on the runtime's
-// logger, with its kind, consumer, event, attempt, and error.
 func TestDefaultHookLogsEachFailureAtWarn(t *testing.T) {
 	b := memory.New()
 	var log syncBuffer
@@ -481,8 +436,6 @@ func TestDefaultHookLogsEachFailureAtWarn(t *testing.T) {
 	}
 }
 
-// A hook set as OnFailure is given each failure in the default's place, so
-// the runtime logs none.
 func TestOnFailureReplacesTheDefaultHook(t *testing.T) {
 	b := memory.New()
 	var log syncBuffer
@@ -494,8 +447,6 @@ func TestOnFailureReplacesTheDefaultHook(t *testing.T) {
 	if got := f.all(); len(got) != 1 || got[0].Kind != messaging.FailureExhausted || got[0].EventID != "e1" {
 		t.Errorf("hook got %+v, want e1's exhaustion", got)
 	}
-	// The hook replaced the default rather than joining it, so nothing
-	// logs the failure; the settle time is the default's chance to.
 	time.Sleep(settleTime)
 	if strings.Contains(log.String(), "messaging failure") {
 		t.Errorf("the default hook logged although OnFailure was set:\n%s", log.String())
@@ -504,8 +455,6 @@ func TestOnFailureReplacesTheDefaultHook(t *testing.T) {
 
 var claimColumns = []string{"seq", "header", "data"}
 
-// claimEvent scripts ClaimRow returning e at seq, encoded as the sink
-// writes it.
 func claimEvent(t *testing.T, seq int64, e event.Event) sqltest.Response {
 	t.Helper()
 	h, data, err := event.Encode(e)
@@ -519,20 +468,13 @@ func claimEvent(t *testing.T, seq int64, e event.Event) sqltest.Response {
 	return sqltest.Response{Columns: claimColumns, Rows: [][]driver.Value{{seq, header, data}}}
 }
 
-// The relay's reports reach the hook classified: a quarantined row as a
-// quarantine, and a pass a transient publish failure or a database error
-// ends as a relay failure, each with the event's identity when the relay
-// knew it. Each publish is bounded by the configured relay timeout.
 func TestRelayFailuresReachTheHookClassified(t *testing.T) {
 	broken := errors.New("connection reset")
 	down := errors.New("broker down")
 	pool, rec := sqltest.Open(t,
-		// The first pass: a row that does not decode, quarantined, then a
-		// row whose publish fails transiently, which ends the pass.
 		sqltest.Response{Columns: claimColumns, Rows: [][]driver.Value{{int64(1), []byte("not json"), []byte("{}")}}},
 		sqltest.Response{Affected: 1},
 		claimEvent(t, 2, event1),
-		// The last pass, on shutdown: the claim fails.
 		sqltest.Response{Err: broken},
 	)
 	db := sqlate.Wrap(pool, sqltest.Dialect{})
@@ -585,8 +527,6 @@ func TestRelayFailuresReachTheHookClassified(t *testing.T) {
 	}
 }
 
-// A relay row that decodes and is quarantined, its publish refused
-// permanently, carries the event's identity.
 func TestRelayQuarantineCarriesTheEvent(t *testing.T) {
 	pool, _ := sqltest.Open(t, claimEvent(t, 1, event1), sqltest.Response{Affected: 1}, sqltest.Response{Columns: claimColumns})
 	cfg := config(t)
@@ -643,7 +583,6 @@ func TestConfigFinalize(t *testing.T) {
 	}
 }
 
-// syncBuffer serializes the reactor's writes and the test's read.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

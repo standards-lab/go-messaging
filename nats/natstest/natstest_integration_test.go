@@ -15,9 +15,6 @@ import (
 	"github.com/standards-lab/go-messaging/nats/natstest"
 )
 
-// TestScratch proves Scratch's names are unique and usable, that it creates
-// no stream itself, and that its cleanup deletes a stream created under its
-// name and tolerates none being created.
 func TestScratch(t *testing.T) {
 	url := natstest.Open(t)
 	js := jetStream(t, url)
@@ -56,7 +53,6 @@ func TestScratch(t *testing.T) {
 	}
 }
 
-// jetStream connects to url, closing the connection when the test ends.
 func jetStream(t *testing.T, url string) jetstream.JetStream {
 	t.Helper()
 	nc, err := natsgo.Connect(url)
@@ -71,7 +67,6 @@ func jetStream(t *testing.T, url string) jetstream.JetStream {
 	return js
 }
 
-// ctx is a context bounded to 10s, cancelled when the test ends.
 func ctx(t *testing.T) context.Context {
 	c, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	t.Cleanup(cancel)

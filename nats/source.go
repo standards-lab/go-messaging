@@ -25,17 +25,9 @@ import (
 const AckMargin = 250 * time.Millisecond
 
 const (
-	// pullWait bounds one pull, so a pull the server holds for a member that
-	// has stopped expires soon.
-	pullWait = time.Second
-	// settleWait bounds the wait for the server to confirm an
-	// acknowledgement.
-	settleWait = 5 * time.Second
-	// retryWait is how long a member waits after a pull fails before it
-	// pulls again.
-	retryWait = 100 * time.Millisecond
-	// failuresBeforeCheck is how many pulls in a row may fail before the
-	// member asks the server whether its consumer still exists.
+	pullWait            = time.Second
+	settleWait          = 5 * time.Second
+	retryWait           = 100 * time.Millisecond
 	failuresBeforeCheck = 3
 )
 
@@ -56,50 +48,35 @@ func (b *Broker) Subscribe(sub messaging.Subscription, report messaging.Report) 
 	return &source{b: b, sub: sub, cfg: b.consumerConfig(sub), report: report}, nil
 }
 
-// consumerConfig is the durable consumer the normalized sub describes, its
-// filter subjects the subscription's types, since each type is its subject.
-// It is derived the same way for every member, so members of a Name bind
-// one consumer, and a different subscription under the Name fails to bind.
 func (b *Broker) consumerConfig(sub messaging.Subscription) jetstream.ConsumerConfig {
 	maxDeliver := sub.MaxDeliver
 	if maxDeliver == 0 {
-		maxDeliver = -1 // JetStream's unlimited
+		maxDeliver = -1
 	}
 	deliver := jetstream.DeliverAllPolicy
 	if sub.Start == messaging.StartNew {
 		deliver = jetstream.DeliverNewPolicy
 	}
 	cfg := jetstream.ConsumerConfig{
-		Durable:       sub.Name,
-		DeliverPolicy: deliver,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       sub.AckWait + AckMargin,
-		MaxDeliver:    maxDeliver,
-		// A clone, so the consumer's config shares no array with sub.
+		Durable:        sub.Name,
+		DeliverPolicy:  deliver,
+		AckPolicy:      jetstream.AckExplicitPolicy,
+		AckWait:        sub.AckWait + AckMargin,
+		MaxDeliver:     maxDeliver,
 		FilterSubjects: slices.Clone(sub.Types),
 	}
 	return cfg
 }
 
-// source is one member of a durable consumer: the loop a reactor runs.
+// See docs/internals.md
 type source struct {
 	b      *Broker
-	sub    messaging.Subscription // normalized
+	sub    messaging.Subscription
 	cfg    jetstream.ConsumerConfig
 	report messaging.Report
 	ready  atomic.Bool
 }
 
-// Receive binds the consumer, then delivers its messages to fn one at a
-// time until ctx ends. It fails with [ErrNotStarted] before the broker's
-// Start, and when the binding fails, as when the Name's consumer has
-// another configuration. It ends with an error when the connection closes
-// or the consumer or its stream is deleted. Every other error it survives
-// goes to the report function: a message it cannot decode or whose
-// metadata does not parse, both of which it terminates; an outcome that
-// fails to send; and a failed pull, including one that ends empty while the
-// connection is down, after which the source reports not ready until a
-// pull succeeds again. A handler error never ends Receive.
 func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) error {
 	c := s.b.conn.Load()
 	if c == nil {
@@ -116,8 +93,6 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 	defer s.ready.Store(false)
 	failures := 0
 	for ctx.Err() == nil {
-		// The pull's context ends with ctx, and its deadline sets the pull's
-		// expiry on the server.
 		pctx, cancel := context.WithTimeout(ctx, pullWait)
 		msg, err := cons.Next(jetstream.FetchContext(pctx))
 		cancel()
@@ -128,7 +103,6 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 			s.deliver(ctx, msg, fn)
 		case ctx.Err() != nil:
 		case empty(err) && c.nc.IsConnected():
-			// An empty pull is a healthy one, while the connection is up.
 			failures = 0
 			s.ready.Store(true)
 		case errors.Is(err, natsgo.ErrConnectionClosed), errors.Is(err, jetstream.ErrConsumerDeleted):
@@ -136,13 +110,6 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 		case empty(err) && c.nc.IsClosed():
 			return fmt.Errorf("nats: receive %s: %w", s.sub.Name, natsgo.ErrConnectionClosed)
 		default:
-			// Most failures pass, such as a reconnect or a leader election.
-			// While the connection is down, the client buffers the pull
-			// request and nothing answers, so the pull ends as an empty one
-			// would: that is a failure too, named for the connection's state.
-			// A deleted consumer or stream does not pass: its pulls fail
-			// with no responders, so after a few failures the member asks
-			// the server, which it can only do while connected.
 			if empty(err) {
 				err = fmt.Errorf("connection %s: %w", c.nc.Status(), err)
 			}
@@ -163,13 +130,10 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 	return nil
 }
 
-// empty reports whether err is how a pull that found no message ends.
 func empty(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, natsgo.ErrTimeout) || errors.Is(err, jetstream.ErrNoMessages)
 }
 
-// gone returns the error that says cons or its stream no longer exists, or
-// nil when it does or the server cannot say.
 func (s *source) gone(ctx context.Context, cons jetstream.Consumer) error {
 	ictx, cancel := context.WithTimeout(ctx, pullWait)
 	defer cancel()
@@ -180,14 +144,8 @@ func (s *source) gone(ctx context.Context, cons jetstream.Consumer) error {
 	return nil
 }
 
-// deliver handles one message and settles its outcome, unless the handler
-// missed its deadline, receipt plus the subscription's AckWait, in which
-// case the outcome is dropped and the server redelivers the message once
-// the consumer's longer AckWait passes.
 func (s *source) deliver(ctx context.Context, msg jetstream.Msg, fn reactor.Func[event.Event]) {
 	deadline := time.Now().Add(s.sub.AckWait)
-	// The attempt comes from the server's delivered count, so a message
-	// whose metadata does not parse has none to give and is never handled.
 	md, err := msg.Metadata()
 	if err != nil {
 		s.reportf(ctx, "message on %s: %w", msg.Subject(), err)
@@ -196,8 +154,6 @@ func (s *source) deliver(ctx context.Context, msg jetstream.Msg, fn reactor.Func
 	}
 	e, err := event.Decode(event.Header(msg.Headers()), msg.Data())
 	if err != nil {
-		// A message that cannot decode can never be handled, so it is
-		// terminated, and reported, since no handler sees it.
 		s.reportf(ctx, "message %d: %w", md.Sequence.Stream, err)
 		s.settle(ctx, msg, "terminate", msg.Term)
 		return
@@ -224,15 +180,12 @@ func (s *source) deliver(ctx context.Context, msg jetstream.Msg, fn reactor.Func
 	}
 }
 
-// settle sends one outcome for msg, reporting a failure to send it.
 func (s *source) settle(ctx context.Context, msg jetstream.Msg, what string, send func() error) {
 	if err := send(); err != nil {
 		s.reportf(ctx, "%s message on %s: %w", what, msg.Subject(), err)
 	}
 }
 
-// reportf passes the report function an error the source survives, wrapped
-// with the source's Name; with no report function it discards it.
 func (s *source) reportf(ctx context.Context, format string, args ...any) {
 	if s.report == nil {
 		return
@@ -240,5 +193,4 @@ func (s *source) reportf(ctx context.Context, format string, args ...any) {
 	s.report(ctx, fmt.Errorf("nats: %s: "+format, append([]any{s.sub.Name}, args...)...))
 }
 
-// Ready reports whether the source is receiving.
 func (s *source) Ready() bool { return s.ready.Load() }

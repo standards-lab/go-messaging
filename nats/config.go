@@ -112,8 +112,6 @@ func (cfg *Config) Finalize(envPrefix string) error {
 	return cfg.Validate()
 }
 
-// envName is the environment variable that overrides the block's key under
-// prefix, or "" for no prefix, which no variable is read under.
 func envName(prefix, key string) string {
 	return config.EnvName(prefix, "nats", key)
 }
@@ -156,13 +154,10 @@ func (cfg Config) Validate() error {
 	return nil
 }
 
-// owner reports whether the broker owns the stream: Owner is set and true.
 func (cfg Config) owner() bool {
 	return cfg.Owner != nil && *cfg.Owner
 }
 
-// window is the stream's deduplication window: Duplicates, or
-// [messaging.DefaultDuplicates] when it is 0.
 func (cfg Config) window() time.Duration {
 	if cfg.Duplicates == 0 {
 		return messaging.DefaultDuplicates

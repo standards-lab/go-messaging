@@ -15,8 +15,6 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// defaultTimeout bounds the handling of one row unless
-// [RelayOptions.Timeout] sets it.
 const defaultTimeout = 10 * time.Second
 
 // RelayOptions configures a [Relay]. The zero RelayOptions discards
@@ -173,8 +171,6 @@ func (r *Relay) Receive(ctx context.Context, fn reactor.Func[event.Event]) error
 		t.Stop()
 	}
 	if r.drain > 0 {
-		// The last pass's failure is reported and leaves its row for the
-		// next start, as any failed pass does, so it is not Receive's error.
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.drain)
 		defer cancel()
 		r.settle(dctx, r.pass(dctx, fn))
@@ -182,16 +178,11 @@ func (r *Relay) Receive(ctx context.Context, fn reactor.Func[event.Event]) error
 	return nil
 }
 
-// settle reports err, the outcome of a pass on ctx, unless it is ctx's own
-// end, and returns whether the relay is ready after it: a pass that reached
-// the database throughout, including one a handler's error ended, leaves it
-// ready.
 func (r *Relay) settle(ctx context.Context, err error) bool {
 	if err == nil {
 		return true
 	}
 	if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
-		// The stop interrupted the pass; nothing failed.
 		return true
 	}
 	r.report(ctx, err)
@@ -200,15 +191,12 @@ func (r *Relay) settle(ctx context.Context, err error) bool {
 	return published || gated || ctx.Err() != nil
 }
 
-// gateError is a gated relay's failure to hold its gate other than the
-// wait's context ending: reported, but not the database's failure.
 type gateError struct{ err error }
 
 func (e *gateError) Error() string { return "outbox: relay: gate: " + e.err.Error() }
 
 func (e *gateError) Unwrap() error { return e.err }
 
-// pass handles rows until none is left, returning nil, or until one fails.
 func (r *Relay) pass(ctx context.Context, fn reactor.Func[event.Event]) error {
 	for ctx.Err() == nil {
 		handled, err := r.next(ctx, fn)
@@ -219,11 +207,8 @@ func (r *Relay) pass(ctx context.Context, fn reactor.Func[event.Event]) error {
 	return nil
 }
 
-// next handles the oldest unclaimed row, reporting whether there was one.
+// See docs/internals.md
 func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled bool, err error) {
-	// The gate is held before the transaction begins and released after it
-	// settles: this defer is registered first, so it runs after the
-	// rollback's. The wait is on ctx, so the stop or the drain ends it.
 	if r.gate != nil {
 		release, err := r.gate.Shared(ctx)
 		if err != nil {
@@ -234,12 +219,6 @@ func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled
 		}
 		defer release()
 	}
-	// database/sql rolls a transaction back when the context it began with
-	// ends, so the transaction begins on a context that outlives ctx: a row
-	// claimed before ctx ends is settled, and its handler keeps only its own
-	// deadline. Only the claim itself stops at ctx.
-	// The transaction's own deadline, twice the handler's, bounds a stalled
-	// database or a handler that ignores its deadline.
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*r.timeout)
 	defer cancel()
 	tx, err := r.db.Begin(settle, nil)
@@ -290,8 +269,6 @@ func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled
 		return false, fmt.Errorf("outbox: relay: marking row %d published: %w", seq, err)
 	}
 	if n != 1 {
-		// An engine whose mark changes no row would have the relay publish
-		// the row again on every pass.
 		return false, fmt.Errorf("outbox: relay: marking row %d published changed %d rows, want 1", seq, n)
 	}
 	if err := tx.Commit(); err != nil {
@@ -300,18 +277,12 @@ func (r *Relay) next(ctx context.Context, fn reactor.Func[event.Event]) (handled
 	return true, nil
 }
 
-// quarantine marks q's row quarantined in tx, the transaction that claimed
-// it, commits, and reports q, so the pass goes on to the next row. A failure
-// to quarantine is a database error, which ends the pass with the row left
-// as it was.
 func (r *Relay) quarantine(ctx, settle context.Context, tx *sqlate.Tx, q *QuarantineError) (bool, error) {
 	n, err := r.eng.Quarantine.Exec(settle, tx, query.Args{"seq": q.Seq, "reason": q.Reason})
 	if err != nil {
 		return false, fmt.Errorf("outbox: relay: quarantining row %d: %w", q.Seq, err)
 	}
 	if n != 1 {
-		// An engine whose quarantine changes no row would have the relay
-		// claim the row again on every pass.
 		return false, fmt.Errorf("outbox: relay: quarantining row %d changed %d rows, want 1", q.Seq, n)
 	}
 	if err := tx.Commit(); err != nil {
@@ -328,14 +299,12 @@ func (r *Relay) quarantine(ctx, settle context.Context, tx *sqlate.Tx, q *Quaran
 // pass, and readiness speaks only for the database.
 func (r *Relay) Ready() bool { return r.ready.Load() }
 
-// row is one claimed outbox row.
 type row struct {
 	seq    int64
 	header []byte
 	data   []byte
 }
 
-// scanRow reads ClaimRow's columns in the order [Engine] fixes.
 func scanRow(r query.Row) (row, error) {
 	var v row
 	err := r.Scan(&v.seq, &v.header, &v.data)

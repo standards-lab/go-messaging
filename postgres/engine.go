@@ -14,10 +14,7 @@ import (
 //go:embed statements/*.sql
 var statementFiles embed.FS
 
-// statements is the outbox's and the inbox's SQL, compiled once for
-// Postgres. The files include no patterns, so the catalog is sqlate's own.
-// A compile error is a defect in the embedded files, which any test of the
-// package finds.
+// See docs/internals.md
 var statements = query.MustCatalog(query.Patterns()).MustCompile(statementFiles, "statements", pgdialect.Dialect{})
 
 // Outbox returns the outbox's statements for Postgres, for [outbox.New].
@@ -35,8 +32,6 @@ func Inbox() inbox.Engine {
 	return inbox.Engine{Claim: statements.Statement("claim_inbox")}
 }
 
-// countPending is outside the Engine contract: the outbox itself never
-// counts its rows.
 var countPending = statements.Statement("count_pending").Scan(query.Scalar[int])
 
 // Pending counts the outbox rows awaiting publication, neither published nor
