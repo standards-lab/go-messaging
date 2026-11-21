@@ -13,9 +13,7 @@ The README, the pages under `docs/`, and each package's `doc.go` document this r
 [Go Elemental](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md) standard states the principles it follows.
 This context records only working knowledge the code and its documentation do not express.
 
-The design is the coordinator's `standards-lab/context/messaging.md`. The source is
-spike-messaging's `messaging` modules
-([github.com/JaimeStill/spike-messaging](https://github.com/JaimeStill/spike-messaging), archived).
+The design is the coordinator's `standards-lab/context/messaging.md`.
 
 The code and each `doc.go` are authoritative for a built capability; an unbuilt capability gains
 written detail when a session is about to build it.

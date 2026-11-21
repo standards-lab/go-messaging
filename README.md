@@ -64,13 +64,12 @@ mise run down                  # stop them, discarding their data
 ```
 
 The check builds each module with the workspace off, so each resolves its own pins. `compose.yml`
-runs PostgreSQL on port 5435 and NATS with JetStream on port 4225, clear of sqlate's 5433,
-blobfs's 5434, a service's 5432, and another NATS server's 4222. `POSTGRES_PORT` and `NATS_PORT`
-move them, and `MESSAGING_DSN` and `MESSAGING_NATS_URL` in `mise.toml` follow. Each
-integration task starts only its own service and stops it whatever the result. Both services
-keep their data in tmpfs; the postgres suite gives each test its own database, and the nats suite
-its own stream. CI runs the check on every pull request and push to main, and both integration
-suites on push to main and on manual dispatch.
+runs PostgreSQL on port 5435 and NATS with JetStream on port 4225, clear of the other repositories'
+development ports. `POSTGRES_PORT` and `NATS_PORT` move them, and `MESSAGING_DSN` and
+`MESSAGING_NATS_URL` in `mise.toml` follow. Each integration task starts only its own service and
+stops it whatever the result. Both services keep their data in tmpfs; the postgres suite gives each
+test its own database, and the nats suite its own stream. CI runs the check on every pull request
+and push to main, and both integration suites on push to main and on manual dispatch.
 
 [`docs/internals.md`](docs/internals.md) holds the reasoning behind the unexported machinery of
 each package, for a contributor changing it.

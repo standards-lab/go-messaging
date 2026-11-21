@@ -4,10 +4,6 @@
 # network and writes nothing. Run it through `mise run currency`. The actions it
 # checks are those of the project root's workflows and, when the repository nests
 # the project in a subdirectory, of the git top-level's.
-#
-# Each scan captures its command's output in a variable before reading it, so
-# under set -e a scan command that fails (a go list missing a go.sum entry)
-# fails currency instead of reporting nothing.
 # See docs/internals.md
 # See architecture/principles/rolling-currency.md
 set -euo pipefail
