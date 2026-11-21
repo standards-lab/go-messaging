@@ -1,7 +1,7 @@
 # The harness's PostgreSQL: the server the integration suite connects to
 # through MESSAGING_DSN, creating and dropping a database per test. This
 # FROM line is PostgreSQL's one pin.
-FROM postgres:18.7-alpine
+FROM postgres:19.0-alpine
 
 # The user, password, and database MESSAGING_DSN names; development values,
 # not secrets.
