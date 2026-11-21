@@ -42,7 +42,7 @@ matches() {
 
 tool_modules() {
 	local out err
-	err=$(mktemp)
+	err=$(mktemp) || return
 	if ! out=$(go list -f '{{.Module.Path}}' tool 2>"$err"); then
 		cat "$err" >&2
 		rm -f "$err"
@@ -60,11 +60,13 @@ report_outdated_direct_requirements() {
 }
 
 report_outdated_indirect_tool_modules() {
-	local mod=$1 tools updates
-	tools=$(cd "$mod" && tool_modules)
-	if [ -n "$tools" ]; then
+	local mod=$1 list updates
+	local tools=()
+	list=$(cd "$mod" && tool_modules)
+	if [ -n "$list" ]; then
+		mapfile -t tools <<<"$list"
 		updates=$(cd "$mod" && go list -m -u -f \
-			'{{if and (not .Main) .Indirect .Update}}{{.Path}} {{.Version}} -> {{.Update.Version}}{{end}}' $tools)
+			'{{if and (not .Main) .Indirect .Update}}{{.Path}} {{.Version}} -> {{.Update.Version}}{{end}}' "${tools[@]}")
 		report_each_line "$mod/go.mod: " "$updates"
 	fi
 }
@@ -94,7 +96,7 @@ report_outdated_mise_tools() {
 
 collect_workflows() {
 	local root top
-	root=$(pwd -P)
+	root=$(pwd -P) || return
 	top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
 	workflows=("$root"/.github/workflows/*.yml)
 	[ "$top" = "$root" ] || workflows+=("$top"/.github/workflows/*.yml)
