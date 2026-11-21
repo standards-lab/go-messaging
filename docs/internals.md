@@ -141,9 +141,12 @@ unpublished monitoring port.
 
 ### currency
 
-A tool's module is an indirect requirement, so `scripts/currency.sh` scans it apart from the
-direct requirements; go list's standard error, which carries the warning for a module with no tool
-directive and any download's progress, is shown only when go list fails. An image tag counts only
-when it has at least one dot and the pin's variant suffix (18.6-alpine -> -alpine): some images
-also publish bare build numbers that would sort above every release. A compose service built from
-`compose/<service>/Dockerfile` is pinned on its FROM line, not an image: line.
+A tool's module is an indirect requirement, so `scripts/currency.sh` scans it apart from the direct
+requirements; go list's standard error, which carries the warning for a module with no tool
+directive and any download's progress, is shown only when go list fails. Each scan captures its
+command's output in a variable before reading it, so under `set -e` a scan command that fails (a go
+list missing a go.sum entry) fails currency instead of reporting nothing. An image's latest tag
+follows
+[rolling currency](https://github.com/standards-lab/architecture/blob/main/principles/rolling-currency.md).
+A compose service built from `compose/<service>/Dockerfile` is pinned on its FROM line, not an
+image: line.
