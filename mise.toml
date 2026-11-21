@@ -1,10 +1,14 @@
 # See architecture/standards/go-elemental/principles/release-and-ci.md
 # See architecture/principles/rolling-currency.md
+[settings]
+task.run_auto_install = false
+
 [tools]
 go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
 "aqua:google/go-containerregistry" = "0.22.1"
+"github:standards-lab/claude-plugins" = { version = "0.22.0", version_prefix = "marathon/v" }
 
 [env]
 GO_MODULES = ". postgres nats"
@@ -12,7 +16,7 @@ MESSAGING_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', d
 MESSAGING_NATS_URL = "nats://127.0.0.1:{{ get_env(name='NATS_PORT', default='4225') }}"
 
 [tasks.check]
-description = "Build, vet, format, fix, tidy, test, and lint every module with the workspace off, vet and lint covering the integration build tag, then sqlint the postgres module's statements and migrations; stops at the first failure and writes nothing"
+description = "Build, vet, format, fix, tidy, test, and lint every module with the workspace off, vet and lint covering the integration build tag, then sqlint the postgres module's statements and migrations, then run lint-context and lint-references from the repository root; stops at the first failure and writes nothing"
 run = '''
 set -eu
 export GOWORK=off
@@ -31,6 +35,12 @@ done
 echo "check: sqlint"
 cd "$MISE_PROJECT_ROOT/postgres"
 go tool sqlint .
+cd "$MISE_PROJECT_ROOT"
+for lint in lint-context lint-references; do
+  if ! command -v "$lint" >/dev/null; then echo "FAIL: $lint is not on PATH; run mise install"; exit 1; fi
+  echo "check: $lint"
+  "$lint"
+done
 '''
 
 [tasks.currency]
