@@ -1,5 +1,3 @@
-// Adapted from JaimeStill/spike-messaging (46a9f5a): its messaging modules, as a library.
-
 // Package messaging is the standard tier's broker operations: publishing an
 // event and subscribing to events as a reactor source.
 //
