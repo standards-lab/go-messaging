@@ -51,6 +51,12 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
   subject's last message and succeeds with its sequence when it decodes to the appended event's
   source and id, so a retry succeeds on both. Replicated streams report the conflict as error
   code 10164 rather than 10071, and both are a conflict.
+- **Read.** A read looks up the subject's last message once, as the iteration begins, and its
+  sequence bounds the read, so an event appended during the read is not yielded. It reads through
+  an ordered consumer filtered on the subject, starting at the sequence after `after`, and stops
+  at the bound. An empty subject, or one whose last sequence is at or before `after`, creates no
+  consumer. An ordered consumer outlives the client's subscription until the server's inactivity
+  threshold, so the read deletes it when it ends, however it ends.
 - **Binding.** The durable consumer is derived from the normalized subscription the same way for
   every member, its filter subjects the subscription's types, since each type is its subject. So
   the members of a Name bind one consumer, and a different subscription under the Name fails to

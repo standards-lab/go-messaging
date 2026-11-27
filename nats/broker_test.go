@@ -241,3 +241,41 @@ func TestWrongLastSequence(t *testing.T) {
 		t.Error("WrongLastSequence matched an error that is not an API error")
 	}
 }
+
+func readErrs(b *nats.Broker, subject string) []error {
+	var errs []error
+	for _, err := range b.Read(context.Background(), subject, 0) {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
+func TestReadRejects(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, subject := range []string{"", "test..a", "test.", "test.*", "test.>", "test.a b"} {
+		errs := readErrs(b, subject)
+		if len(errs) != 1 || errs[0] == nil || errors.Is(errs[0], nats.ErrNotStarted) {
+			t.Errorf("subject %q: Read yielded %v, want one rejection", subject, errs)
+		}
+	}
+	if errs := readErrs(b, "test.journal"); len(errs) != 1 || !errors.Is(errs[0], nats.ErrNotStarted) {
+		t.Errorf("Read yielded %v, want ErrNotStarted alone", errs)
+	}
+}
+
+func TestReadRefusesSubjectOutsidePrefix(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, subject := range []string{"orders.journal", "test", "testing.journal", "other.test.journal"} {
+		errs := readErrs(b, subject)
+		if len(errs) != 1 || errs[0] == nil || errors.Is(errs[0], nats.ErrNotStarted) {
+			t.Errorf("%s: Read yielded %v, want one refusal", subject, errs)
+			continue
+		}
+		if !event.IsPermanent(errs[0]) {
+			t.Errorf("%s: Read yielded %v, want a permanent error", subject, errs[0])
+		}
+		if msg := errs[0].Error(); !strings.Contains(msg, strconv.Quote(subject)) || !strings.Contains(msg, `"test"`) {
+			t.Errorf("%s: Read yielded %v, want it to name the subject and the prefix test", subject, errs[0])
+		}
+	}
+}
