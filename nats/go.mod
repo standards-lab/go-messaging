@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/nats-io/nats.go v1.56.0
 	github.com/standards-lab/go-core v0.12.0
-	github.com/standards-lab/go-messaging v0.3.0
+	github.com/standards-lab/go-messaging v0.4.0
 )
 
 require (
@@ -16,5 +16,3 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
-
-replace github.com/standards-lab/go-messaging => ../
