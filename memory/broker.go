@@ -107,27 +107,24 @@ func (b *Broker) Append(_ context.Context, subject string, expect uint64, e even
 }
 
 // Read returns subject's events after the stream sequence after, as
-// [messaging.Journal] describes. Each iteration copies the log's entries for
-// subject as it begins, so it holds nothing while it yields.
+// [messaging.Journal] describes. Each iteration takes the log as it stands
+// when it begins, so it holds nothing while it yields.
 func (b *Broker) Read(_ context.Context, subject string, after uint64) iter.Seq2[messaging.Entry, error] {
 	return func(yield func(messaging.Entry, error) bool) {
-		var seqs []uint64
-		var msgs []message
 		b.mu.Lock()
-		for i := after; i < uint64(len(b.log)); i++ {
-			if b.log[i].subject == subject {
-				seqs = append(seqs, i+1)
-				msgs = append(msgs, b.log[i])
-			}
-		}
+		log := b.log
 		b.mu.Unlock()
-		for i, m := range msgs {
+		for i := after; i < uint64(len(log)); i++ {
+			m, seq := log[i], i+1
+			if m.subject != subject {
+				continue
+			}
 			e, err := event.Decode(m.header, m.body)
 			if err != nil {
-				yield(messaging.Entry{}, fmt.Errorf("memory: read %q: message %d: %w", subject, seqs[i], err))
+				yield(messaging.Entry{}, fmt.Errorf("memory: read %q: message %d: %w", subject, seq, err))
 				return
 			}
-			if !yield(messaging.Entry{Event: e, Sequence: seqs[i]}, nil) {
+			if !yield(messaging.Entry{Event: e, Sequence: seq}, nil) {
 				return
 			}
 		}

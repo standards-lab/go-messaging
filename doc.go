@@ -66,11 +66,11 @@
 //
 // The package imports no broker and no engine: the composition root hands
 // them to [Setup]. A provider, such as the memory package, implements
-// [Broker] and, on the same stream, [Journal], and the messagingtest package
-// holds the conformance suites every provider passes. The outbox and inbox packages run their tables on any
-// engine that supplies the statements; the postgres sub-module is that
-// engine for PostgreSQL, and the nats sub-module is the NATS JetStream
-// provider.
+// [Broker] and, on the same stream, [Journal], and the messagingtest
+// package holds the conformance suites every provider passes. The outbox and
+// inbox packages run their tables on any engine that supplies the
+// statements; the postgres sub-module is that engine for PostgreSQL, and the
+// nats sub-module is the NATS JetStream provider.
 //
 // The base module depends on the standard library, go-core, and sqlate and
 // its query package, the adjacent library the outbox's and inbox's engine
