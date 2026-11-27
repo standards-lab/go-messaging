@@ -11,12 +11,12 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ### Added
 
-- `Journal`, which a provider implements beside `Broker` on the same stream: `Append` stores a
+- `Journal`, which a provider implements beside `Broker` on the same stream. `Append` stores a
   stamped event on a subject the caller names when the subject's last stream sequence is the
-  expected one, 0 for a subject with no event, and returns its sequence; `Read` yields a
+  expected one, 0 for a subject with no event, and returns the event's sequence. `Read` yields a
   subject's events after a sequence, in order, ending at the subject's last event as it stood
-  when the read began. An append checks the expected sequence before it consults the
-  deduplication window it shares with `Publish`; a retry of an append already stored returns its
+  when the read began. An append checks the expected sequence before the deduplication window it
+  shares with `Publish`. A retry of an append already stored returns the stored event's
   sequence when the expected sequence matches or the event is still the subject's last, and
   otherwise conflicts.
 - `Entry`, an event read from a journal subject with its stream sequence, and `ErrConflict`, the

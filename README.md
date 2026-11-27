@@ -22,23 +22,23 @@ its provider's.
 ## Packages
 
 - `messaging` (the root) is the broker contract and the runtime: `Broker` and `Publisher`,
-  `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, the `Journal`
-  that appends to and reads back a subject of the broker's stream, with its `Entry` and
-  `ErrConflict`, `Config`, the `Runtime` with its `Relay` and `Consume` reactors, the `Setup`
-  whose `Build` builds it, the error hook's `Failure` and `Hook`, and the quiesce gate's `Gate`.
+  `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`, the
+  `Runtime` with its `Relay` and `Consume` reactors, the `Setup` whose `Build` builds it, the
+  error hook's `Failure` and `Hook`, and the quiesce gate's `Gate`. Its `Journal`, with `Entry`
+  and `ErrConflict`, appends to a subject of the broker's stream and reads the subject back.
 - `outbox` writes a command's events in the command's own transaction and relays them to the
   broker, quarantining a row that can never be published. `Outbox.Relay` takes its report,
   per-row timeout, last-pass drain, and gate as one `outbox.RelayOptions` value.
 - `inbox` is a consumer's claim on an event, so a redelivery is handled once.
-- `memory` is the in-memory provider, a `Broker` and `Journal`, for a service's tests and the
+- `memory` is the in-memory provider, a `Broker` and a `Journal`, for a service's tests and the
   conformance double.
 - `messagingtest` is the conformance suite every provider passes: `Run` for the broker, and
   `RunJournal` for the journal.
 - `postgres` (sub-module) is the PostgreSQL engine: the outbox's and inbox's statements, the
   `messaging` migration set, `Verify`, `Pending`, and the retentions, `OutboxRetention` and
   `InboxRetention`, that delete aged published and handled rows a budget at a time.
-- `nats` (sub-module) is the NATS JetStream provider: the `Broker` on one stream, also its
-  `Journal`, its `Config` block with the stream's owner switch, and the durable pull consumers
+- `nats` (sub-module) is the NATS JetStream provider: the `Broker` on one stream, which is also
+  a `Journal`, its `Config` block with the stream's owner switch, and the durable pull consumers
   its sources bind. Its `natstest` package gives each test its own stream.
 
 The package documentation, `go doc github.com/standards-lab/go-messaging/...`, is the reference
@@ -48,7 +48,7 @@ for each exported name; each package's `doc.go` inventories its exports.
 
 [`docs/usage.md`](docs/usage.md) shows the library in use: wiring the runtime, the NATS broker,
 the relay and consumers as graph nodes, the error hook, quarantine, retention, MaxDeliver
-exhaustion, the quiesce gate, and appending to and folding a stream-backed root.
+exhaustion, the quiesce gate, and folding and appending to a stream-backed root.
 
 ## Development
 

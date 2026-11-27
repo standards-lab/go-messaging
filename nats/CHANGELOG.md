@@ -13,9 +13,9 @@ changelog covers this sub-module only; the base module keeps its own.
 
 - `Broker.Append` and `Broker.Read`, implementing `messaging.Journal` on the broker's stream.
   `Append` publishes the event on the caller's subject, which must be under `Prefix`, with the
-  expected last sequence for that subject and the event's source and id as `Nats-Msg-Id`, and
-  reports a wrong last sequence as `messaging.ErrConflict` unless the subject's last message is
-  the appended event. `Read` reads the subject through an ordered consumer, bounded by the
+  subject's expected last sequence and the event's source and id as `Nats-Msg-Id`. It reports a
+  wrong last sequence as `messaging.ErrConflict` unless the subject's last message is the
+  appended event. `Read` reads the subject through an ordered consumer, bounded by the
   subject's last message when the read begins, and deletes the consumer when the read ends.
 - The provider passes `messagingtest.RunJournal`.
 

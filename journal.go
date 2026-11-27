@@ -36,7 +36,9 @@ type Journal interface {
 	// in one window: when expect matches, a source and id the broker has
 	// seen within its deduplication window is not stored again, and Append
 	// returns the original event's sequence. A repeat whose expect is stale
-	// fails with [ErrConflict] unless the original is subject's last event.
+	// fails with [ErrConflict] unless the original is subject's last event,
+	// except on a provider that deduplicates first, such as a replicated
+	// JetStream stream, where it returns the original event's sequence.
 	//
 	// Append rejects an event that [Encode] rejects, a header value holding
 	// CR or LF, and a subject that breaks [CheckType].

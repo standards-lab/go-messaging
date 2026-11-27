@@ -44,24 +44,27 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
   `Prefix.>`.
 - **Deduplication key.** A message's id is its event's source and id, which together identify a
   CloudEvents event. The source is length-prefixed, so no source and id pair spells another's key.
-- **Append.** An append is a publish with the subject's expected last sequence, and its message
-  id is Publish's, so the two share the deduplication window. A single server checks the
-  sequence before it deduplicates, so a retry whose first acknowledgement was lost conflicts,
-  where a cluster answers it with a duplicate acknowledgement. On a conflict, Append fetches the
-  subject's last message and succeeds with its sequence when it decodes to the appended event's
-  source and id, so a retry succeeds on both. Replicated streams report the conflict as error
-  code 10164 rather than 10071, and both are a conflict. The memory broker mirrors a single
-  server's order: it checks the sequence, then the deduplication window.
-- **Read.** A read looks up the subject's last message once, as the iteration begins, and its
-  sequence bounds the read, so an event appended during the read is not yielded. It reads through
-  an ordered consumer filtered on the subject, starting at the sequence after `after`, and stops
-  at the bound. The bound's message can be removed before the consumer reaches it, by a delete or
-  by MaxAge, so the read also stops without yielding at a message past the bound, and after a
-  message the consumer reports nothing pending behind, rather than waiting for one that will not
-  come. The sequence stays the primary stop: the pending count alone would yield an event
-  appended during the read. An empty subject, or one whose last sequence is at or before `after`, creates no
-  consumer. An ordered consumer outlives the client's subscription until the server's inactivity
-  threshold, so the read deletes it when it ends, however it ends.
+- **Append.** An append is a publish with the subject's expected last sequence and Publish's
+  message id, so appends and publishes share the deduplication window. A single server checks the
+  sequence before it deduplicates, so a retry whose first acknowledgement was lost conflicts; a
+  cluster answers the same retry with a duplicate acknowledgement. To make the retry succeed on
+  both, Append fetches the subject's last message on a conflict and returns its sequence when it
+  decodes to the appended event's source and id. A replicated stream reports the conflict as
+  error code 10164 rather than 10071, and Append treats both as a conflict. The memory broker
+  follows a single server's order: it checks the sequence, then the deduplication window. The
+  integration suite runs one server, so the cluster's order and code 10164 come from the server's
+  source, untested here.
+- **Read.** A read looks up the subject's last message once, as the iteration begins, and that
+  message's sequence bounds the read, so an event appended during the read is not yielded. The
+  read goes through an ordered consumer filtered on the subject, starting at the sequence after
+  `after`, and stops at the bound. A delete or MaxAge can remove the bound's message before the
+  consumer reaches it, so instead of waiting for a message that will not come, the read also
+  stops at a message past the bound, without yielding it, and after a message behind which the
+  consumer reports nothing pending. The bound stays the primary stop, because the pending count
+  alone would yield an event appended during the read. An empty subject, or one whose last
+  sequence is at or before `after`, creates no consumer. An ordered consumer outlives the
+  client's subscription until the server's inactivity threshold, so the read deletes it however
+  the read ends.
 - **Binding.** The durable consumer is derived from the normalized subscription the same way for
   every member, its filter subjects the subscription's types, since each type is its subject. So
   the members of a Name bind one consumer, and a different subscription under the Name fails to
