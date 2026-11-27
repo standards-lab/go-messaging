@@ -44,6 +44,13 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
   `Prefix.>`.
 - **Deduplication key.** A message's id is its event's source and id, which together identify a
   CloudEvents event. The source is length-prefixed, so no source and id pair spells another's key.
+- **Append.** An append is a publish with the subject's expected last sequence, and its message
+  id is Publish's, so the two share the deduplication window. A single server checks the
+  sequence before it deduplicates, so a retry whose first acknowledgement was lost conflicts,
+  where a cluster answers it with a duplicate acknowledgement. On a conflict, Append fetches the
+  subject's last message and succeeds with its sequence when it decodes to the appended event's
+  source and id, so a retry succeeds on both. Replicated streams report the conflict as error
+  code 10164 rather than 10071, and both are a conflict.
 - **Binding.** The durable consumer is derived from the normalized subscription the same way for
   every member, its filter subjects the subscription's types, since each type is its subject. So
   the members of a Name bind one consumer, and a different subscription under the Name fails to

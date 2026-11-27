@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/standards-lab/go-core/event"
 
 	"github.com/standards-lab/go-messaging"
@@ -180,5 +182,62 @@ func TestSubscribeRefusesTypeOutsidePrefix(t *testing.T) {
 	}
 	if _, err := b.Subscribe(messaging.Subscription{Name: "orders", Types: []string{"test.created", "test.paid"}}, nil); err != nil {
 		t.Errorf("Subscribe to types under the prefix: %v", err)
+	}
+}
+
+func TestAppendRejects(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	valid := event.Event{ID: "1", Source: "/test", Type: "orders.created"}
+	for name, e := range map[string]event.Event{
+		"no id":         {Source: "/test", Type: "test.t"},
+		"wildcard type": {ID: "1", Source: "/test", Type: "test.t.*"},
+		"LF":            {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\nlines"}},
+		"CR":            {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\rlines"}},
+		"CR in subject": {ID: "1", Source: "/test", Type: "test.t", Subject: "a\rb"},
+	} {
+		if _, err := b.Append(t.Context(), "test.journal", 0, e); err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("%s: Append = %v, want a rejection", name, err)
+		}
+	}
+	for _, subject := range []string{"", "test..a", "test.", "test.*", "test.>", "test.a b"} {
+		if _, err := b.Append(t.Context(), subject, 0, valid); err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("subject %q: Append = %v, want a rejection", subject, err)
+		}
+	}
+	if _, err := b.Append(t.Context(), "test.journal", 0, valid); !errors.Is(err, nats.ErrNotStarted) {
+		t.Errorf("Append = %v, want ErrNotStarted: the event and subject are valid, the type need not be under the prefix", err)
+	}
+}
+
+func TestAppendRefusesSubjectOutsidePrefix(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, subject := range []string{"orders.journal", "test", "testing.journal", "other.test.journal"} {
+		_, err := b.Append(t.Context(), subject, 0, event.Event{ID: "1", Source: "/test", Type: "test.t"})
+		if err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("%s: Append = %v, want a refusal", subject, err)
+			continue
+		}
+		if !event.IsPermanent(err) {
+			t.Errorf("%s: Append = %v, want a permanent error", subject, err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, strconv.Quote(subject)) || !strings.Contains(msg, `"test"`) {
+			t.Errorf("%s: Append = %v, want it to name the subject and the prefix test", subject, err)
+		}
+	}
+}
+
+func TestWrongLastSequence(t *testing.T) {
+	for code, want := range map[jetstream.ErrorCode]bool{
+		jetstream.JSErrCodeStreamWrongLastSequence:         true,
+		jetstream.JSErrCodeStreamWrongLastSequenceConstant: true,
+		jetstream.JSErrCodeMessageNotFound:                 false,
+	} {
+		err := fmt.Errorf("publish: %w", &jetstream.APIError{Code: 400, ErrorCode: code})
+		if got := nats.WrongLastSequence(err); got != want {
+			t.Errorf("error code %d: WrongLastSequence = %t, want %t", code, got, want)
+		}
+	}
+	if nats.WrongLastSequence(errors.New("wrong last sequence")) {
+		t.Error("WrongLastSequence matched an error that is not an API error")
 	}
 }

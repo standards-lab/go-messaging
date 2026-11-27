@@ -4,7 +4,9 @@
 //
 //   - [Broker], the provider: a [messaging.Broker] on one stream, built by
 //     [New], with [Broker.Start], [Broker.Ready], [Broker.Shutdown],
-//     [Broker.Publish], [Broker.Subscribe], and [Broker.Conn]
+//     [Broker.Publish], [Broker.Subscribe], and [Broker.Conn]; and
+//     [Broker.Append], which stores an event on a subject the caller names,
+//     guarded by the subject's last stream sequence
 //   - [Config], the service's nats block, with [Config.Merge],
 //     [Config.Finalize], and [Config.Validate]; and [DefaultURL], the server
 //     Finalize fills in
@@ -40,6 +42,9 @@
 // type that is not under Prefix as [event.Permanent], and [Broker.Subscribe]
 // refuses a subscription naming one. A broker with the prefix billing
 // publishes billing.invoice.issued, and a consumer subscribes to that type.
+// [Broker.Append] stores an event on the subject its caller names instead,
+// which must be under Prefix too; the event's type is unchanged, and a
+// consumer's type filter matches the subject.
 //
 // # Sources
 //
