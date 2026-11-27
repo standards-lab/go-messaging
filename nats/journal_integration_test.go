@@ -5,6 +5,7 @@ package nats_test
 import (
 	"context"
 	"iter"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -194,5 +195,63 @@ func TestReadCreatesNoConsumerWhenNothingToRead(t *testing.T) {
 			break
 		}
 		t.Errorf("a read created consumer %s", msg.Subject)
+	}
+}
+
+func TestReadEndsWhenItsBoundIsDeleted(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		during bool
+	}{
+		{"an event appended during the read", true},
+		{"nothing after it", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b, url, stream, prefix := ownerBroker(t)
+			js := jetStream(t, url)
+			ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+			defer cancel()
+			s, err := js.Stream(ctx, stream)
+			if err != nil {
+				t.Fatalf("stream %s: %v", stream, err)
+			}
+			subject := prefix + ".journal"
+			ev := func(id string) event.Event { return event.Event{ID: id, Source: "/test", Type: prefix + ".t"} }
+			var first, bound uint64
+			for i := range 5000 {
+				seq, err := b.Append(ctx, subject, bound, ev(strconv.Itoa(i)))
+				if err != nil {
+					t.Fatalf("Append %d: %v", i, err)
+				}
+				if i == 0 {
+					first = seq
+				}
+				bound = seq
+			}
+			var read int
+			for entry, err := range b.Read(ctx, subject, 0) {
+				if err != nil {
+					t.Fatalf("Read after %d entries: %v", read, err)
+				}
+				read++
+				if entry.Sequence >= bound {
+					t.Errorf("read %s at %d, want nothing at or past the deleted bound %d", entry.Event.ID, entry.Sequence, bound)
+				}
+				if entry.Sequence != first {
+					continue
+				}
+				if err := s.DeleteMsg(ctx, bound); err != nil {
+					t.Fatalf("delete the bound %d: %v", bound, err)
+				}
+				if c.during {
+					if _, err := b.Append(ctx, subject, bound-1, ev("during")); err != nil {
+						t.Fatalf("Append during the read: %v", err)
+					}
+				}
+			}
+			if read != 4999 {
+				t.Errorf("read %d entries, want the 4999 before the deleted bound", read)
+			}
+		})
 	}
 }

@@ -54,7 +54,11 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
 - **Read.** A read looks up the subject's last message once, as the iteration begins, and its
   sequence bounds the read, so an event appended during the read is not yielded. It reads through
   an ordered consumer filtered on the subject, starting at the sequence after `after`, and stops
-  at the bound. An empty subject, or one whose last sequence is at or before `after`, creates no
+  at the bound. The bound's message can be removed before the consumer reaches it, by a delete or
+  by MaxAge, so the read also stops without yielding at a message past the bound, and after a
+  message the consumer reports nothing pending behind, rather than waiting for one that will not
+  come. The sequence stays the primary stop: the pending count alone would yield an event
+  appended during the read. An empty subject, or one whose last sequence is at or before `after`, creates no
   consumer. An ordered consumer outlives the client's subscription until the server's inactivity
   threshold, so the read deletes it when it ends, however it ends.
 - **Binding.** The durable consumer is derived from the normalized subscription the same way for

@@ -297,7 +297,8 @@ func wrongLastSequence(err error) bool {
 // [messaging.Journal.Read]. It looks up subject's last message once, when
 // the iteration begins, and reads through an ordered consumer filtered on
 // subject up to that message's sequence, so an event stored during the
-// read is not yielded. A subject with no message, or whose last sequence is
+// read is not yielded. When that message is removed before the read reaches
+// it, the read ends at the subject's last message before it. A subject with no message, or whose last sequence is
 // at or before after, yields nothing and creates no consumer. A message that
 // does not decode yields its error and ends the read. The consumer is
 // deleted when the read ends, whether it reached the end, failed, or was
@@ -360,11 +361,14 @@ func (b *Broker) read(ctx context.Context, subject string, after uint64, yield f
 			return fmt.Errorf("nats: read %s: %w", subject, err)
 		}
 		seq := meta.Sequence.Stream
+		if seq > last.Sequence {
+			return nil
+		}
 		e, err := event.Decode(event.Header(m.Headers()), m.Data())
 		if err != nil {
 			return fmt.Errorf("nats: read %s: message %d: %w", subject, seq, err)
 		}
-		if !yield(messaging.Entry{Event: e, Sequence: seq}, nil) || seq == last.Sequence {
+		if !yield(messaging.Entry{Event: e, Sequence: seq}, nil) || seq == last.Sequence || meta.NumPending == 0 {
 			return nil
 		}
 	}
