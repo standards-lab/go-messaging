@@ -1,5 +1,6 @@
 // Package messaging is the standard tier's broker operations: publishing an
-// event and subscribing to events as a reactor source.
+// event, subscribing to events as a reactor source, and appending to and
+// reading back a subject of the broker's stream.
 //
 // The package exports:
 //
@@ -65,8 +66,8 @@
 //
 // The package imports no broker and no engine: the composition root hands
 // them to [Setup]. A provider, such as the memory package, implements
-// [Broker], and the messagingtest package holds the conformance suite every
-// provider passes. The outbox and inbox packages run their tables on any
+// [Broker] and, on the same stream, [Journal], and the messagingtest package
+// holds the conformance suites every provider passes. The outbox and inbox packages run their tables on any
 // engine that supplies the statements; the postgres sub-module is that
 // engine for PostgreSQL, and the nats sub-module is the NATS JetStream
 // provider.

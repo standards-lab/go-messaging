@@ -225,3 +225,52 @@ reports nothing: the relay claims no row, and the consumer hands its handler not
 the event for redelivery. A delivery's wait counts against its `AckWait`, so one that waits past
 it is redelivered and counts against `MaxDeliver`. With a nil `Gate`, nothing holds a gate; a
 non-nil interface holding a nil pointer is a set gate, and is held.
+
+## Appending to a stream-backed root
+
+A root whose state is its events, rather than a row, keeps them on one subject of the broker's
+stream, through the broker's `messaging.Journal`. The service folds the subject's events into the
+root's state, noting the last sequence it folded, and appends the event a command decides with that
+sequence as the expected one:
+
+```go
+subject := "billing.account.42" // under the broker's prefix
+var state Account
+var last uint64 // 0: the subject has no event yet
+
+for entry, err := range broker.Read(ctx, subject, last) {
+	if err != nil {
+		return err
+	}
+	state.Apply(entry.Event)
+	last = entry.Sequence
+}
+
+seq, err := broker.Append(ctx, subject, last, e) // e decided from state, stamped
+```
+
+`Append` stores `e` only while `last` is the subject's last sequence, and returns its sequence.
+When another writer appended first, it fails with an error wrapping `messaging.ErrConflict`; the
+service reads the subject again after `last`, folds the new events into its state, decides
+again, and appends with the new last sequence:
+
+```go
+for errors.Is(err, messaging.ErrConflict) {
+	for entry, err := range broker.Read(ctx, subject, last) {
+		// ... fold entry into state and set last, as above ...
+	}
+	// ... decide e again from state ...
+	seq, err = broker.Append(ctx, subject, last, e)
+}
+```
+
+A retry of the same append, after an error that left its outcome unknown, sends the same event:
+its source and id identify it, so the retry returns the stored event's sequence rather than a
+conflict. A read ends at the subject's last event as it stood when the read began, so an event
+appended during the read waits for the next one.
+
+An appended subject must sit under the broker's `Prefix`, which the stream captures; the NATS
+broker refuses one outside it as permanent. A root kept on a separate stream needs a second
+broker, with that stream's `Config`. An appended event is a message on the stream like a published
+one, so it reaches the stream's subscriptions, but a subscription's type filter matches the subject
+an event is on, not its type: a consumer of appended events names their subjects in its `Types`.

@@ -22,6 +22,10 @@ written detail when a session is about to build it.
 
 - **Broker contract and subscriptions** (built): the root package, `messaging`
   ([doc.go](../doc.go), [broker.go](../broker.go)).
+- **Journal** (built): the guarded append and the bounded read on a stream subject
+  ([doc.go](../doc.go), [journal.go](../journal.go)), implemented by the memory and NATS
+  providers ([memory/doc.go](../memory/doc.go), [nats/doc.go](../nats/doc.go)) and proven by
+  `messagingtest.RunJournal` ([messagingtest/doc.go](../messagingtest/doc.go)).
 - **Runtime and its error hook** (built): the root package ([runtime.go](../runtime.go),
   [config.go](../config.go), [failure.go](../failure.go)).
 - **Outbox** (built): the outbox, with poison-row quarantine ([outbox/doc.go](../outbox/doc.go)).
