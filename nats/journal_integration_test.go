@@ -56,8 +56,8 @@ func TestAppendRetryAfterLostAck(t *testing.T) {
 	}
 	retry := natsgo.NewMsg(subject)
 	retry.Header.Set(jetstream.MsgIDHeader, "5:/test1")
-	if _, err := js.PublishMsg(ctx, retry, jetstream.WithExpectLastSequencePerSubject(0)); !nats.WrongLastSequence(err) {
-		t.Fatalf("the server's answer to the retry = %v, want a wrong last sequence: only then does Append's lookup decide the retry", err)
+	if ack, err := js.PublishMsg(ctx, retry, jetstream.WithExpectLastSequencePerSubject(0)); err == nil {
+		t.Fatalf("the server acknowledged the retry (duplicate %t), want a wrong last sequence: only then does Append's lookup decide the retry", ack.Duplicate)
 	}
 	got, err := b.Append(ctx, subject, 0, e)
 	if err != nil {

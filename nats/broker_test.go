@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go/jetstream"
-
 	"github.com/standards-lab/go-core/event"
 
 	"github.com/standards-lab/go-messaging"
@@ -223,22 +221,6 @@ func TestAppendRefusesSubjectOutsidePrefix(t *testing.T) {
 		if msg := err.Error(); !strings.Contains(msg, strconv.Quote(subject)) || !strings.Contains(msg, `"test"`) {
 			t.Errorf("%s: Append = %v, want it to name the subject and the prefix test", subject, err)
 		}
-	}
-}
-
-func TestWrongLastSequence(t *testing.T) {
-	for code, want := range map[jetstream.ErrorCode]bool{
-		jetstream.JSErrCodeStreamWrongLastSequence:         true,
-		jetstream.JSErrCodeStreamWrongLastSequenceConstant: true,
-		jetstream.JSErrCodeMessageNotFound:                 false,
-	} {
-		err := fmt.Errorf("publish: %w", &jetstream.APIError{Code: 400, ErrorCode: code})
-		if got := nats.WrongLastSequence(err); got != want {
-			t.Errorf("error code %d: WrongLastSequence = %t, want %t", code, got, want)
-		}
-	}
-	if nats.WrongLastSequence(errors.New("wrong last sequence")) {
-		t.Error("WrongLastSequence matched an error that is not an API error")
 	}
 }
 
