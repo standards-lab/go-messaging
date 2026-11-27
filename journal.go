@@ -32,9 +32,11 @@ type Journal interface {
 	// that event's sequence, so a retry whose first append was stored
 	// succeeds.
 	//
-	// Append deduplicates with [Publisher.Publish], in one window: a source
-	// and id the broker has seen within its deduplication window is not
-	// stored again, and Append returns the original event's sequence.
+	// Append checks expect before it deduplicates, with [Publisher.Publish],
+	// in one window: when expect matches, a source and id the broker has
+	// seen within its deduplication window is not stored again, and Append
+	// returns the original event's sequence. A repeat whose expect is stale
+	// fails with [ErrConflict] unless the original is subject's last event.
 	//
 	// Append rejects an event that [Encode] rejects, a header value holding
 	// CR or LF, and a subject that breaks [CheckType].

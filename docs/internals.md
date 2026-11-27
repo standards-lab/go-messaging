@@ -50,7 +50,8 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
   where a cluster answers it with a duplicate acknowledgement. On a conflict, Append fetches the
   subject's last message and succeeds with its sequence when it decodes to the appended event's
   source and id, so a retry succeeds on both. Replicated streams report the conflict as error
-  code 10164 rather than 10071, and both are a conflict.
+  code 10164 rather than 10071, and both are a conflict. The memory broker mirrors a single
+  server's order: it checks the sequence, then the deduplication window.
 - **Read.** A read looks up the subject's last message once, as the iteration begins, and its
   sequence bounds the read, so an event appended during the read is not yielded. It reads through
   an ordered consumer filtered on the subject, starting at the sequence after `after`, and stops

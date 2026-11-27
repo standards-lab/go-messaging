@@ -266,8 +266,10 @@ for errors.Is(err, messaging.ErrConflict) {
 
 A retry of the same append, after an error that left its outcome unknown, sends the same event:
 its source and id identify it, so the retry returns the stored event's sequence rather than a
-conflict. A read ends at the subject's last event as it stood when the read began, so an event
-appended during the read waits for the next one.
+conflict. A stale retry of an append that already landed conflicts unless its event is still the
+subject's last; the service reads the subject again and finds its event among the new ones. A read
+ends at the subject's last event as it stood when the read began, so an event appended during the
+read waits for the next one.
 
 An appended subject must sit under the broker's `Prefix`, which the stream captures; the NATS
 broker refuses one outside it as permanent. A root kept on a separate stream needs a second

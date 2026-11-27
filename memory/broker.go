@@ -74,7 +74,8 @@ func (b *Broker) Publish(_ context.Context, e event.Event) error {
 // Append appends e to the log on subject, as [messaging.Journal] describes,
 // and wakes every consumer. Its log is numbered like a stream, from 1, and
 // shared with Publish, as is its deduplication window,
-// [messaging.DefaultDuplicates].
+// [messaging.DefaultDuplicates]. Like a single NATS server, it checks expect
+// before it consults the window.
 func (b *Broker) Append(_ context.Context, subject string, expect uint64, e event.Event) (uint64, error) {
 	h, body, err := messaging.Encode(e)
 	if err == nil {
@@ -92,14 +93,14 @@ func (b *Broker) Append(_ context.Context, subject string, expect uint64, e even
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	key := identity{e.Source, e.ID}
-	if seq, ok := b.duplicate(key, now); ok {
-		return seq, nil
-	}
 	if last := b.last(subject); last != expect {
 		if last > 0 && b.log[last-1].id == key {
 			return last, nil
 		}
 		return 0, fmt.Errorf("memory: append %q at %d, last %d: %w", subject, expect, last, messaging.ErrConflict)
+	}
+	if seq, ok := b.duplicate(key, now); ok {
+		return seq, nil
 	}
 	seq := b.add(message{subject: subject, id: key, header: h, body: body})
 	b.seen[key] = seen{at: now, seq: seq}

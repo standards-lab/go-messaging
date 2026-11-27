@@ -23,7 +23,8 @@
 // event's delivery count. Like a stream with a deduplication window, the
 // broker stores a source and id once within [messaging.DefaultDuplicates],
 // one window for Publish and Append: a repeated publish is dropped, and a
-// repeated append returns the original event's sequence. Nothing persists
+// repeated append whose expected sequence matches returns the original
+// event's sequence. Nothing persists
 // beyond the process.
 //
 // The package reads in three layers: broker.go holds the log and the

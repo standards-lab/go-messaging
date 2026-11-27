@@ -235,8 +235,9 @@ func (b *Broker) Publish(ctx context.Context, e event.Event) error {
 // message, and returns its stream sequence; it implements
 // [messaging.Journal.Append]. The message carries e's source and id as
 // Nats-Msg-Id, so a repeat within the stream's deduplication window,
-// whether appended or published, returns the original's sequence. When the
-// stream reports another last sequence, Append looks up subject's last
+// whether appended or published, returns the original's sequence when
+// expect matches. When the stream reports another last sequence, which a
+// single server checks before it deduplicates, Append looks up subject's last
 // message, and returns its sequence when it is e, so a retry whose first
 // acknowledgement was lost succeeds; otherwise it fails wrapping
 // [messaging.ErrConflict], naming subject and expect.

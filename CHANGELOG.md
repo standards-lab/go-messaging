@@ -15,8 +15,10 @@ only; the `postgres` and `nats` sub-modules keep their own.
   stamped event on a subject the caller names when the subject's last stream sequence is the
   expected one, 0 for a subject with no event, and returns its sequence; `Read` yields a
   subject's events after a sequence, in order, ending at the subject's last event as it stood
-  when the read began. An append shares the broker's deduplication window with `Publish`, and a
-  retry of an append already stored returns its sequence.
+  when the read began. An append checks the expected sequence before it consults the
+  deduplication window it shares with `Publish`; a retry of an append already stored returns its
+  sequence when the expected sequence matches or the event is still the subject's last, and
+  otherwise conflicts.
 - `Entry`, an event read from a journal subject with its stream sequence, and `ErrConflict`, the
   error an append wraps when the subject's last sequence is not the expected one.
 - `memory.Broker.Append` and `memory.Broker.Read`: the memory provider is a `Journal`.

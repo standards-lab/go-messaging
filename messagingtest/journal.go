@@ -32,6 +32,7 @@ func RunJournal[B interface {
 		{"AppendSequences", testAppendSequences},
 		{"AppendConflicts", testAppendConflicts},
 		{"AppendRetryAfterStored", testAppendRetryAfterStored},
+		{"AppendStaleRepeatConflicts", testAppendStaleRepeatConflicts},
 		{"AppendDeduplicates", testAppendDeduplicates},
 		{"AppendSharesPublishWindow", testAppendSharesPublishWindow},
 		{"AppendRejectsInvalid", testAppendRejectsInvalid},
@@ -111,6 +112,21 @@ func testAppendRetryAfterStored(t *testing.T, j journal) {
 	}
 	if third := appended(t, j, "journal.a", second, ev("3", "t")); third <= second {
 		t.Errorf("the append after the retry has sequence %d, want one after %d: the retry must store nothing", third, second)
+	}
+}
+
+func testAppendStaleRepeatConflicts(t *testing.T, j journal) {
+	first := appended(t, j, "journal.a", 0, ev("1", "t"))
+	second := appended(t, j, "journal.a", first, ev("2", "t"))
+	if seq, err := j.Append(context.Background(), "journal.a", 0, ev("1", "t")); !errors.Is(err, messaging.ErrConflict) {
+		t.Errorf("repeating an append that is no longer the subject's last, at its stale sequence: got %d, %v; want ErrConflict", seq, err)
+	}
+	third := appended(t, j, "journal.a", second, ev("3", "t"))
+	if got, want := ids(read(t, j, "journal.a", 0)), []string{"1", "2", "3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("read %v, want %v: the conflicting repeat stores nothing", got, want)
+	}
+	if third <= second {
+		t.Errorf("the append after the repeat has sequence %d, want one after %d", third, second)
 	}
 }
 
