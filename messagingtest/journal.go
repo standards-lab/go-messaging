@@ -3,9 +3,11 @@ package messagingtest
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-messaging"
@@ -33,6 +35,11 @@ func RunJournal[B interface {
 		{"AppendDeduplicates", testAppendDeduplicates},
 		{"AppendSharesPublishWindow", testAppendSharesPublishWindow},
 		{"AppendRejectsInvalid", testAppendRejectsInvalid},
+		{"ReadInOrder", testReadInOrder},
+		{"ReadEndsAtStart", testReadEndsAtStart},
+		{"ReadReleasesOnBreak", testReadReleasesOnBreak},
+		{"AppendReachesSubscriptions", testAppendReachesSubscriptions},
+		{"AppendFilterMatchesSubject", testAppendFilterMatchesSubject},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, newJournal(t)) })
@@ -155,4 +162,149 @@ func testAppendRejectsInvalid(t *testing.T, j journal) {
 		}
 	}
 	appended(t, j, "journal.a", 0, ev("valid", "t"))
+}
+
+func read(t *testing.T, j journal, subject string, after uint64) []messaging.Entry {
+	t.Helper()
+	var entries []messaging.Entry
+	for entry, err := range j.Read(context.Background(), subject, after) {
+		if err != nil {
+			t.Fatalf("Read %s after %d: %v", subject, after, err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func appendedWithin(t *testing.T, j journal, subject string, expect uint64, e event.Event) uint64 {
+	t.Helper()
+	type result struct {
+		seq uint64
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		seq, err := j.Append(context.Background(), subject, expect, e)
+		done <- result{seq, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Append %s to %s at %d: %v", e.ID, subject, expect, r.err)
+		}
+		return r.seq
+	case <-time.After(failsafe):
+		t.Fatalf("Append %s to %s did not return: a read still holds the journal", e.ID, subject)
+		return 0
+	}
+}
+
+func ids(entries []messaging.Entry) []string {
+	var got []string
+	for _, entry := range entries {
+		got = append(got, entry.Event.ID)
+	}
+	return got
+}
+
+func testReadInOrder(t *testing.T, j journal) {
+	full := event.Event{
+		ID:              "full",
+		Source:          "/grants",
+		Type:            "lab.grant.approved",
+		Subject:         "grant/42",
+		DataContentType: "application/json",
+		DataSchema:      "https://example.com/schemas/grant.json",
+		Time:            time.Date(2026, 9, 24, 13, 0, 0, 123456789, time.UTC),
+		Data:            []byte(`{"id":42}`),
+		Extensions:      map[string]string{"traceparent": "00-abc-def-01"},
+	}
+	first := appended(t, j, "journal.a", 0, full)
+	appended(t, j, "journal.b", 0, ev("other", "t"))
+	publish(t, j, ev("published", "journal.pub"))
+	second := appended(t, j, "journal.a", first, ev("2", "t"))
+	third := appended(t, j, "journal.a", second, ev("3", "t"))
+
+	all := read(t, j, "journal.a", 0)
+	if got, want := ids(all), []string{"full", "2", "3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("read %v, want %v: only the subject's events, in sequence order", got, want)
+	}
+	for i, seq := range []uint64{first, second, third} {
+		if all[i].Sequence != seq {
+			t.Errorf("entry %s has sequence %d, want its append's %d", all[i].Event.ID, all[i].Sequence, seq)
+		}
+	}
+	if !reflect.DeepEqual(all[0].Event, full) {
+		t.Errorf("read back:\n got %+v\nwant %+v", all[0].Event, full)
+	}
+	if got, want := ids(read(t, j, "journal.a", first)), []string{"2", "3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("read after %d: %v, want %v", first, got, want)
+	}
+	if got := read(t, j, "journal.a", third); len(got) != 0 {
+		t.Errorf("read after the last event yielded %v, want nothing", ids(got))
+	}
+	if got := read(t, j, "journal.empty", 0); len(got) != 0 {
+		t.Errorf("read of a subject with no events yielded %v, want nothing", ids(got))
+	}
+}
+
+func testReadEndsAtStart(t *testing.T, j journal) {
+	first := appended(t, j, "journal.a", 0, ev("1", "t"))
+	last := appended(t, j, "journal.a", first, ev("2", "t"))
+	var got []string
+	for entry, err := range j.Read(context.Background(), "journal.a", 0) {
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		got = append(got, entry.Event.ID)
+		if entry.Sequence == first {
+			last = appendedWithin(t, j, "journal.a", last, ev("during", "t"))
+		}
+	}
+	if want := []string{"1", "2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("read %v, want %v: an event appended during the read is not yielded", got, want)
+	}
+	if got, want := ids(read(t, j, "journal.a", 0)), []string{"1", "2", "during"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the next read: %v, want %v", got, want)
+	}
+}
+
+func testReadReleasesOnBreak(t *testing.T, j journal) {
+	first := appended(t, j, "journal.a", 0, ev("1", "t"))
+	last := appended(t, j, "journal.a", first, ev("2", "t"))
+	for _, err := range j.Read(context.Background(), "journal.a", 0) {
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		break
+	}
+	appendedWithin(t, j, "journal.a", last, ev("after", "t"))
+	if got, want := ids(read(t, j, "journal.a", 0)), []string{"1", "2", "after"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the read after the break: %v, want %v", got, want)
+	}
+}
+
+func testAppendReachesSubscriptions(t *testing.T, j journal) {
+	var d deliveries
+	member(t, j, messaging.Subscription{Name: "all"}, d.record("m"))
+	a := appended(t, j, "journal.a", 0, ev("1", "t"))
+	appended(t, j, "journal.b", 0, ev("2", "t"))
+	publish(t, j, ev("3", "t"))
+	appended(t, j, "journal.a", a, ev("end", "t"))
+	eventually(t, d.has("end"), "the last appended event")
+	if got, want := d.seen(), []string{"1", "2", "3", "end"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("delivered %v, want %v", got, want)
+	}
+}
+
+func testAppendFilterMatchesSubject(t *testing.T, j journal) {
+	var d deliveries
+	member(t, j, messaging.Subscription{Name: "subject", Types: []string{"journal.a"}}, d.record("m"))
+	a := appended(t, j, "journal.a", 0, ev("on-subject", "journal.b"))
+	appended(t, j, "journal.b", 0, ev("on-type", "journal.a"))
+	appended(t, j, "journal.a", a, ev("end", "t"))
+	eventually(t, d.has("end"), "the last event on the filtered subject")
+	if got, want := d.seen(), []string{"on-subject", "end"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("delivered %v, want %v: the filter matches the subject, not the type", got, want)
+	}
 }

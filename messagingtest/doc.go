@@ -29,4 +29,9 @@
 // appended. An append shares the broker's deduplication window with
 // Publish, and it rejects an event [messaging.Encode] rejects, a header
 // value holding CR or LF, and a subject that breaks [messaging.CheckType].
+// They prove the read: a subject's events come back after a sequence, in
+// order and intact, ending where the subject stood when the read began, and
+// a read stopped early holds nothing that blocks an append. An appended
+// event reaches the broker's subscriptions, and a type filter matches its
+// subject, not its type.
 package messagingtest

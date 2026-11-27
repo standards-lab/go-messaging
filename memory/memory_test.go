@@ -3,6 +3,7 @@ package memory_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -54,6 +55,36 @@ func TestRetryFindsLastEventAfterWindow(t *testing.T) {
 	other.Source = "/other"
 	if _, err := b.Append(ctx, "s", 0, other); !errors.Is(err, messaging.ErrConflict) {
 		t.Errorf("another source's event past the window: got %v, want ErrConflict", err)
+	}
+}
+
+func TestReadStopsAtUndecodable(t *testing.T) {
+	b := memory.New()
+	ctx := context.Background()
+	if _, err := b.Append(ctx, "s", 0, event.Event{ID: "1", Source: "/t", Type: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	b.AppendRaw("s", event.Header{}, []byte("not an event"))
+	if _, err := b.Append(ctx, "s", 2, event.Event{ID: "3", Source: "/t", Type: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	var errs []error
+	for entry, err := range b.Read(ctx, "s", 0) {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		got = append(got, entry.Event.ID)
+	}
+	if want := []string{"1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("read %v, want %v: the read ends at the undecodable message", got, want)
+	}
+	if len(errs) != 1 {
+		t.Errorf("read yielded %d errors, want the undecodable message's one", len(errs))
+	}
+	if seq, err := b.Append(ctx, "s", 3, event.Event{ID: "4", Source: "/t", Type: "t"}); err != nil || seq != 4 {
+		t.Errorf("Append after the failed read = %d, %v; want 4", seq, err)
 	}
 }
 
