@@ -3,7 +3,10 @@ package memory
 import (
 	"context"
 	"fmt"
+	"iter"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,8 +15,8 @@ import (
 	"github.com/standards-lab/go-messaging"
 )
 
-// Broker is an in-memory [messaging.Broker]. Its zero value is not usable;
-// call [New].
+// Broker is an in-memory [messaging.Broker] and [messaging.Journal]. Its
+// zero value is not usable; call [New].
 //
 // One mutex guards the log and every consumer, so the consumer's methods
 // never lock; the broker and the sources take mu around them.
@@ -21,27 +24,37 @@ type Broker struct {
 	mu        sync.Mutex
 	log       []message
 	consumers map[string]*consumer
-	seen      map[identity]time.Time
+	seen      map[identity]seen
 }
 
 type identity struct{ source, id string }
 
+type seen struct {
+	at  time.Time
+	seq uint64
+}
+
 type message struct {
-	typ    string
-	header event.Header
-	body   []byte
+	subject string
+	id      identity
+	header  event.Header
+	body    []byte
 }
 
 // New returns an empty broker.
 func New() *Broker {
-	return &Broker{consumers: map[string]*consumer{}, seen: map[identity]time.Time{}}
+	return &Broker{consumers: map[string]*consumer{}, seen: map[identity]seen{}}
 }
 
-var _ messaging.Broker = (*Broker)(nil)
+var (
+	_ messaging.Broker  = (*Broker)(nil)
+	_ messaging.Journal = (*Broker)(nil)
+)
 
-// Publish appends e to the log and wakes every consumer. When an event with
-// e's source and id was published within [messaging.DefaultDuplicates],
-// Publish instead drops e and returns nil.
+// Publish appends e to the log on its type's subject and wakes every
+// consumer. When an event with e's source and id was published or appended
+// within [messaging.DefaultDuplicates], Publish instead drops e and returns
+// nil.
 func (b *Broker) Publish(_ context.Context, e event.Event) error {
 	h, body, err := messaging.Encode(e)
 	if err != nil {
@@ -50,19 +63,111 @@ func (b *Broker) Publish(_ context.Context, e event.Event) error {
 	now := time.Now()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for id, at := range b.seen {
-		if now.Sub(at) >= messaging.DefaultDuplicates {
+	key := identity{e.Source, e.ID}
+	if _, ok := b.duplicate(key, now); ok {
+		return nil
+	}
+	b.seen[key] = seen{at: now, seq: b.add(message{subject: e.Type, id: key, header: h, body: body})}
+	return nil
+}
+
+// Append appends e to the log on subject, as [messaging.Journal] describes,
+// and wakes every consumer. Its log is numbered like a stream, from 1, and
+// shared with Publish, as is its deduplication window,
+// [messaging.DefaultDuplicates].
+func (b *Broker) Append(_ context.Context, subject string, expect uint64, e event.Event) (uint64, error) {
+	h, body, err := messaging.Encode(e)
+	if err == nil {
+		err = carriable(h)
+	}
+	if err == nil {
+		if err = messaging.CheckType(subject); err != nil {
+			err = fmt.Errorf("subject: %w", err)
+		}
+	}
+	if err != nil {
+		return 0, fmt.Errorf("memory: append: %w", err)
+	}
+	now := time.Now()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := identity{e.Source, e.ID}
+	if seq, ok := b.duplicate(key, now); ok {
+		return seq, nil
+	}
+	if last := b.last(subject); last != expect {
+		if last > 0 && b.log[last-1].id == key {
+			return last, nil
+		}
+		return 0, fmt.Errorf("memory: append %q at %d, last %d: %w", subject, expect, last, messaging.ErrConflict)
+	}
+	seq := b.add(message{subject: subject, id: key, header: h, body: body})
+	b.seen[key] = seen{at: now, seq: seq}
+	return seq, nil
+}
+
+// Read returns subject's events after the stream sequence after, as
+// [messaging.Journal] describes. Each iteration copies the log's entries for
+// subject as it begins, so it holds nothing while it yields.
+func (b *Broker) Read(_ context.Context, subject string, after uint64) iter.Seq2[messaging.Entry, error] {
+	return func(yield func(messaging.Entry, error) bool) {
+		var seqs []uint64
+		var msgs []message
+		b.mu.Lock()
+		for i := after; i < uint64(len(b.log)); i++ {
+			if b.log[i].subject == subject {
+				seqs = append(seqs, i+1)
+				msgs = append(msgs, b.log[i])
+			}
+		}
+		b.mu.Unlock()
+		for i, m := range msgs {
+			e, err := event.Decode(m.header, m.body)
+			if err != nil {
+				yield(messaging.Entry{}, fmt.Errorf("memory: read %q: message %d: %w", subject, seqs[i], err))
+				return
+			}
+			if !yield(messaging.Entry{Event: e, Sequence: seqs[i]}, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (b *Broker) duplicate(key identity, now time.Time) (uint64, bool) {
+	for id, s := range b.seen {
+		if now.Sub(s.at) >= messaging.DefaultDuplicates {
 			delete(b.seen, id)
 		}
 	}
-	key := identity{e.Source, e.ID}
-	if _, ok := b.seen[key]; ok {
-		return nil
+	s, ok := b.seen[key]
+	return s.seq, ok
+}
+
+func (b *Broker) last(subject string) uint64 {
+	for i, v := range slices.Backward(b.log) {
+		if v.subject == subject {
+			return uint64(i + 1)
+		}
 	}
-	b.seen[key] = now
-	b.log = append(b.log, message{typ: e.Type, header: h, body: body})
+	return 0
+}
+
+func (b *Broker) add(m message) uint64 {
+	b.log = append(b.log, m)
 	for _, c := range b.consumers {
 		c.wakeAll()
+	}
+	return uint64(len(b.log))
+}
+
+func carriable(h event.Header) error {
+	for name, vs := range h {
+		for _, v := range vs {
+			if strings.ContainsAny(v, "\r\n") {
+				return fmt.Errorf("header %s: a value must not contain CR or LF", name)
+			}
+		}
 	}
 	return nil
 }

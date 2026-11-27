@@ -19,6 +19,44 @@ func TestConformance(t *testing.T) {
 	messagingtest.Run(t, func(*testing.T) messaging.Broker { return memory.New() })
 }
 
+func TestJournalConformance(t *testing.T) {
+	messagingtest.RunJournal(t, func(*testing.T) *memory.Broker { return memory.New() })
+}
+
+func TestLogNumberedFromOne(t *testing.T) {
+	b := memory.New()
+	ctx := context.Background()
+	if seq, err := b.Append(ctx, "s", 0, event.Event{ID: "1", Source: "/t", Type: "t"}); err != nil || seq != 1 {
+		t.Fatalf("first Append = %d, %v; want 1", seq, err)
+	}
+	if err := b.Publish(ctx, event.Event{ID: "2", Source: "/t", Type: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if seq, err := b.Append(ctx, "s", 1, event.Event{ID: "3", Source: "/t", Type: "t"}); err != nil || seq != 3 {
+		t.Errorf("Append after a publish = %d, %v; want 3: Publish and Append share the log", seq, err)
+	}
+}
+
+func TestRetryFindsLastEventAfterWindow(t *testing.T) {
+	b := memory.New()
+	ctx := context.Background()
+	e := event.Event{ID: "1", Source: "/t", Type: "t"}
+	first, err := b.Append(ctx, "s", 0, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.ForgetDuplicates()
+	if seq, err := b.Append(ctx, "s", 0, e); err != nil || seq != first {
+		t.Errorf("retry past the window = %d, %v; want %d: the subject's last event has its source and id", seq, err, first)
+	}
+	b.ForgetDuplicates()
+	other := e
+	other.Source = "/other"
+	if _, err := b.Append(ctx, "s", 0, other); !errors.Is(err, messaging.ErrConflict) {
+		t.Errorf("another source's event past the window: got %v, want ErrConflict", err)
+	}
+}
+
 func TestLateOutcomeIgnored(t *testing.T) {
 	b := memory.New()
 	sub := messaging.Subscription{Name: "late", AckWait: 50 * time.Millisecond}

@@ -7,6 +7,10 @@
 //     also subscribes reactors; [Encode], the check and encoding every
 //     provider's Publish makes; and [DefaultDuplicates], a broker's
 //     deduplication window when it sets none
+//   - [Journal], which appends events to subjects, each append guarded by
+//     its subject's last stream sequence, and reads a subject back as
+//     [Entry] values; and [ErrConflict], the error of an append whose
+//     expected sequence is not the subject's last
 //   - [Subscription], a durable consumer, with [Subscription.Validate],
 //     [Subscription.Normalize], the form a provider configures its consumer
 //     from, and [Subscription.Matches], its type filter; [Start], where a new
