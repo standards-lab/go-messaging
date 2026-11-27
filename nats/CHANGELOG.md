@@ -7,8 +7,21 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-11-27
+
+### Added
+
+- `Broker.Append` and `Broker.Read`, implementing `messaging.Journal` on the broker's stream.
+  `Append` publishes the event on the caller's subject, which must be under `Prefix`, with the
+  subject's expected last sequence and the event's source and id as `Nats-Msg-Id`. It reports a
+  wrong last sequence as `messaging.ErrConflict` unless the subject's last message is the
+  appended event. `Read` reads the subject through an ordered consumer, bounded by the
+  subject's last message when the read begins, and deletes the consumer when the read ends.
+- The provider passes `messagingtest.RunJournal`.
+
 ### Changed
 
+- The `go-messaging` requirement is v0.4.0, which adds `messaging.Journal`.
 - nats.go is v1.56.0.
 
 ## [v0.3.0] - 2026-11-11
@@ -77,7 +90,8 @@ changelog covers this sub-module only; the base module keeps its own.
   (`nats:2.15.1-alpine`, JetStream on tmpfs), through `mise run integration:nats`.
 - The module requires `go-messaging` v0.1.0, go-core v0.10.0, and nats.go v1.54.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.3.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.4.0...HEAD
+[v0.4.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.3.0...nats/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...nats/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.1.0...nats/v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/nats/v0.1.0

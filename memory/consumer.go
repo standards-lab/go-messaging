@@ -56,7 +56,7 @@ func (c *consumer) take(log []message, now time.Time) (seq int, d delivery, ok b
 		seq = c.retries[pick].seq
 		c.retries = append(c.retries[:pick], c.retries[pick+1:]...)
 	default:
-		for c.cursor < len(log) && !c.sub.Matches(log[c.cursor].typ) {
+		for c.cursor < len(log) && !c.sub.Matches(log[c.cursor].subject) {
 			c.cursor++
 		}
 		if c.cursor == len(log) {

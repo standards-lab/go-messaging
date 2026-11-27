@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,7 +17,10 @@ import (
 	"github.com/standards-lab/go-messaging"
 )
 
-const connectWait = 10 * time.Second
+const (
+	connectWait = 10 * time.Second
+	releaseWait = 10 * time.Second
+)
 
 // ErrNotStarted is the failure of a call that needs the connection, made
 // before [Broker.Start].
@@ -33,11 +37,15 @@ type Broker struct {
 }
 
 type conn struct {
-	nc *natsgo.Conn
-	js jetstream.JetStream
+	nc     *natsgo.Conn
+	js     jetstream.JetStream
+	stream jetstream.Stream
 }
 
-var _ messaging.Broker = (*Broker)(nil)
+var (
+	_ messaging.Broker  = (*Broker)(nil)
+	_ messaging.Journal = (*Broker)(nil)
+)
 
 // New checks cfg and returns a broker on it, unconnected. It does no I/O.
 func New(cfg Config) (*Broker, error) {
@@ -90,20 +98,21 @@ func (b *Broker) Start(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("nats: %w", err)
 	}
+	var s jetstream.Stream
 	if b.cfg.owner() {
-		err = b.provision(ctx, js)
+		s, err = b.provision(ctx, js)
 	} else {
-		err = b.bind(ctx, js)
+		s, err = b.bind(ctx, js)
 	}
 	if err != nil {
 		return err
 	}
-	b.conn.Store(&conn{nc: nc, js: js})
+	b.conn.Store(&conn{nc: nc, js: js, stream: s})
 	return nil
 }
 
-func (b *Broker) provision(ctx context.Context, js jetstream.JetStream) error {
-	_, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+func (b *Broker) provision(ctx context.Context, js jetstream.JetStream) (jetstream.Stream, error) {
+	s, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:       b.cfg.Stream,
 		Subjects:   []string{b.cfg.Prefix + ".>"},
 		Storage:    jetstream.FileStorage,
@@ -112,23 +121,23 @@ func (b *Broker) provision(ctx context.Context, js jetstream.JetStream) error {
 		MaxAge:     b.cfg.MaxAge.Duration(),
 	})
 	if err != nil {
-		return fmt.Errorf("nats: provision stream %s: %w", b.cfg.Stream, err)
+		return nil, fmt.Errorf("nats: provision stream %s: %w", b.cfg.Stream, err)
 	}
-	return nil
+	return s, nil
 }
 
-func (b *Broker) bind(ctx context.Context, js jetstream.JetStream) error {
+func (b *Broker) bind(ctx context.Context, js jetstream.JetStream) (jetstream.Stream, error) {
 	s, err := js.Stream(ctx, b.cfg.Stream)
 	if err != nil {
-		return fmt.Errorf("nats: bind stream %s: %w", b.cfg.Stream, err)
+		return nil, fmt.Errorf("nats: bind stream %s: %w", b.cfg.Stream, err)
 	}
 	subjects := s.CachedInfo().Config.Subjects
 	for _, subj := range subjects {
 		if captures(subj, b.cfg.Prefix) {
-			return nil
+			return s, nil
 		}
 	}
-	return fmt.Errorf("nats: bind stream %s: its subjects %q do not capture %s.>", b.cfg.Stream, subjects, b.cfg.Prefix)
+	return nil, fmt.Errorf("nats: bind stream %s: its subjects %q do not capture %s.>", b.cfg.Stream, subjects, b.cfg.Prefix)
 }
 
 // See docs/internals.md
@@ -204,7 +213,7 @@ func (b *Broker) Publish(ctx context.Context, e event.Event) error {
 		err = carriable(h)
 	}
 	if err == nil {
-		err = b.namespaced(e.Type)
+		err = b.namespaced("type", e.Type)
 	}
 	if err != nil {
 		return fmt.Errorf("nats: publish: %w", err)
@@ -219,6 +228,162 @@ func (b *Broker) Publish(ctx context.Context, e event.Event) error {
 		return fmt.Errorf("nats: publish %s: %w", e.ID, err)
 	}
 	return nil
+}
+
+// Append stores e on subject, as Publish publishes it on its type, when
+// subject's last stream sequence is expect, 0 for a subject with no
+// message, and returns its stream sequence; it implements
+// [messaging.Journal.Append]. The message carries e's source and id as
+// Nats-Msg-Id, so a repeat within the stream's deduplication window,
+// whether appended or published, returns the original's sequence when
+// expect matches. When the stream reports another last sequence, which a
+// single server checks before it deduplicates, Append looks up subject's last
+// message, and returns its sequence when it is e, so a retry whose first
+// acknowledgement was lost succeeds; otherwise it fails wrapping
+// [messaging.ErrConflict], naming subject and expect.
+//
+// Whether or not the broker is started, Append rejects what Publish rejects
+// of e, and a subject that breaks [messaging.CheckType]; it refuses a
+// subject outside Prefix as [event.Permanent]. Otherwise it fails with
+// [ErrNotStarted] before Start.
+func (b *Broker) Append(ctx context.Context, subject string, expect uint64, e event.Event) (uint64, error) {
+	h, body, err := messaging.Encode(e)
+	if err == nil {
+		err = carriable(h)
+	}
+	if err == nil {
+		err = messaging.CheckType(subject)
+	}
+	if err == nil {
+		err = b.namespaced("subject", subject)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("nats: append to %q: %w", subject, err)
+	}
+	c := b.conn.Load()
+	if c == nil {
+		return 0, ErrNotStarted
+	}
+	msg := &natsgo.Msg{Subject: subject, Header: natsgo.Header(h), Data: body}
+	msg.Header.Set(jetstream.MsgIDHeader, msgID(e))
+	ack, err := c.js.PublishMsg(ctx, msg, jetstream.WithExpectLastSequencePerSubject(expect))
+	if err == nil {
+		return ack.Sequence, nil
+	}
+	if !wrongLastSequence(err) {
+		return 0, fmt.Errorf("nats: append %s to %s: %w", e.ID, subject, err)
+	}
+	last, lerr := c.stream.GetLastMsgForSubject(ctx, subject)
+	if lerr == nil && holds(last, e) {
+		return last.Sequence, nil
+	}
+	conflict := fmt.Errorf("nats: append %s to %s at %d: %w", e.ID, subject, expect, messaging.ErrConflict)
+	if lerr != nil && !errors.Is(lerr, jetstream.ErrMsgNotFound) {
+		return 0, fmt.Errorf("%w; its last message: %w", conflict, lerr)
+	}
+	return 0, conflict
+}
+
+func wrongLastSequence(err error) bool {
+	var apiErr *jetstream.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence ||
+		apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequenceConstant
+}
+
+// Read yields subject's events after the stream sequence after, 0 for all,
+// in sequence order, each with its stream sequence; it implements
+// [messaging.Journal.Read]. It looks up subject's last message once, when
+// the iteration begins, and reads through an ordered consumer filtered on
+// subject up to that message's sequence, so an event stored during the
+// read is not yielded. When that message is removed before the read reaches
+// it, the read ends at the subject's last message before it. A subject with no message, or whose last sequence is
+// at or before after, yields nothing and creates no consumer. A message that
+// does not decode yields its error and ends the read. The consumer is
+// deleted when the read ends, whether it reached the end, failed, or was
+// stopped early.
+//
+// Whether or not the broker is started, Read yields as its single error a
+// subject that breaks [messaging.CheckType], and a subject outside Prefix
+// as [event.Permanent]; otherwise it yields [ErrNotStarted] before Start.
+func (b *Broker) Read(ctx context.Context, subject string, after uint64) iter.Seq2[messaging.Entry, error] {
+	return func(yield func(messaging.Entry, error) bool) {
+		if err := b.read(ctx, subject, after, yield); err != nil {
+			yield(messaging.Entry{}, err)
+		}
+	}
+}
+
+func (b *Broker) read(ctx context.Context, subject string, after uint64, yield func(messaging.Entry, error) bool) error {
+	err := messaging.CheckType(subject)
+	if err == nil {
+		err = b.namespaced("subject", subject)
+	}
+	if err != nil {
+		return fmt.Errorf("nats: read %q: %w", subject, err)
+	}
+	c := b.conn.Load()
+	if c == nil {
+		return ErrNotStarted
+	}
+	last, err := c.stream.GetLastMsgForSubject(ctx, subject)
+	if errors.Is(err, jetstream.ErrMsgNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("nats: read %s: its last message: %w", subject, err)
+	}
+	if last.Sequence <= after {
+		return nil
+	}
+	cons, err := c.stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
+		FilterSubjects: []string{subject},
+		DeliverPolicy:  jetstream.DeliverByStartSequencePolicy,
+		OptStartSeq:    after + 1,
+	})
+	if err != nil {
+		return fmt.Errorf("nats: read %s: %w", subject, err)
+	}
+	defer release(ctx, c.stream, cons)
+	msgs, err := cons.Messages()
+	if err != nil {
+		return fmt.Errorf("nats: read %s: %w", subject, err)
+	}
+	defer msgs.Stop()
+	for {
+		m, err := msgs.Next(jetstream.NextContext(ctx))
+		if err != nil {
+			return fmt.Errorf("nats: read %s: %w", subject, err)
+		}
+		meta, err := m.Metadata()
+		if err != nil {
+			return fmt.Errorf("nats: read %s: %w", subject, err)
+		}
+		seq := meta.Sequence.Stream
+		if seq > last.Sequence {
+			return nil
+		}
+		e, err := event.Decode(event.Header(m.Headers()), m.Data())
+		if err != nil {
+			return fmt.Errorf("nats: read %s: message %d: %w", subject, seq, err)
+		}
+		if !yield(messaging.Entry{Event: e, Sequence: seq}, nil) || seq == last.Sequence || meta.NumPending == 0 {
+			return nil
+		}
+	}
+}
+
+func release(ctx context.Context, s jetstream.Stream, cons jetstream.Consumer) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseWait)
+	defer cancel()
+	_ = s.DeleteConsumer(ctx, cons.CachedInfo().Name)
+}
+
+func holds(m *jetstream.RawStreamMsg, e event.Event) bool {
+	got, err := event.Decode(event.Header(m.Header), m.Data)
+	return err == nil && got.Source == e.Source && got.ID == e.ID
 }
 
 func msgID(e event.Event) string {
@@ -236,9 +401,9 @@ func carriable(h event.Header) error {
 	return nil
 }
 
-func (b *Broker) namespaced(typ string) error {
-	if !strings.HasPrefix(typ, b.cfg.Prefix+".") {
-		return event.Permanent(fmt.Errorf("type %q is not under the prefix %q", typ, b.cfg.Prefix))
+func (b *Broker) namespaced(what, name string) error {
+	if !strings.HasPrefix(name, b.cfg.Prefix+".") {
+		return event.Permanent(fmt.Errorf("%s %q is not under the prefix %q", what, name, b.cfg.Prefix))
 	}
 	return nil
 }

@@ -182,3 +182,82 @@ func TestSubscribeRefusesTypeOutsidePrefix(t *testing.T) {
 		t.Errorf("Subscribe to types under the prefix: %v", err)
 	}
 }
+
+func TestAppendRejects(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	valid := event.Event{ID: "1", Source: "/test", Type: "orders.created"}
+	for name, e := range map[string]event.Event{
+		"no id":         {Source: "/test", Type: "test.t"},
+		"wildcard type": {ID: "1", Source: "/test", Type: "test.t.*"},
+		"LF":            {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\nlines"}},
+		"CR":            {ID: "1", Source: "/test", Type: "test.t", Extensions: map[string]string{"note": "two\rlines"}},
+		"CR in subject": {ID: "1", Source: "/test", Type: "test.t", Subject: "a\rb"},
+	} {
+		if _, err := b.Append(t.Context(), "test.journal", 0, e); err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("%s: Append = %v, want a rejection", name, err)
+		}
+	}
+	for _, subject := range []string{"", "test..a", "test.", "test.*", "test.>", "test.a b"} {
+		if _, err := b.Append(t.Context(), subject, 0, valid); err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("subject %q: Append = %v, want a rejection", subject, err)
+		}
+	}
+	if _, err := b.Append(t.Context(), "test.journal", 0, valid); !errors.Is(err, nats.ErrNotStarted) {
+		t.Errorf("Append = %v, want ErrNotStarted: the event and subject are valid, the type need not be under the prefix", err)
+	}
+}
+
+func TestAppendRefusesSubjectOutsidePrefix(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, subject := range []string{"orders.journal", "test", "testing.journal", "other.test.journal"} {
+		_, err := b.Append(t.Context(), subject, 0, event.Event{ID: "1", Source: "/test", Type: "test.t"})
+		if err == nil || errors.Is(err, nats.ErrNotStarted) {
+			t.Errorf("%s: Append = %v, want a refusal", subject, err)
+			continue
+		}
+		if !event.IsPermanent(err) {
+			t.Errorf("%s: Append = %v, want a permanent error", subject, err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, strconv.Quote(subject)) || !strings.Contains(msg, `"test"`) {
+			t.Errorf("%s: Append = %v, want it to name the subject and the prefix test", subject, err)
+		}
+	}
+}
+
+func readErrs(b *nats.Broker, subject string) []error {
+	var errs []error
+	for _, err := range b.Read(context.Background(), subject, 0) {
+		errs = append(errs, err)
+	}
+	return errs
+}
+
+func TestReadRejects(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, subject := range []string{"", "test..a", "test.", "test.*", "test.>", "test.a b"} {
+		errs := readErrs(b, subject)
+		if len(errs) != 1 || errs[0] == nil || errors.Is(errs[0], nats.ErrNotStarted) {
+			t.Errorf("subject %q: Read yielded %v, want one rejection", subject, errs)
+		}
+	}
+	if errs := readErrs(b, "test.journal"); len(errs) != 1 || !errors.Is(errs[0], nats.ErrNotStarted) {
+		t.Errorf("Read yielded %v, want ErrNotStarted alone", errs)
+	}
+}
+
+func TestReadRefusesSubjectOutsidePrefix(t *testing.T) {
+	b := newBroker(t, closedURL(t))
+	for _, subject := range []string{"orders.journal", "test", "testing.journal", "other.test.journal"} {
+		errs := readErrs(b, subject)
+		if len(errs) != 1 || errs[0] == nil || errors.Is(errs[0], nats.ErrNotStarted) {
+			t.Errorf("%s: Read yielded %v, want one refusal", subject, errs)
+			continue
+		}
+		if !event.IsPermanent(errs[0]) {
+			t.Errorf("%s: Read yielded %v, want a permanent error", subject, errs[0])
+		}
+		if msg := errs[0].Error(); !strings.Contains(msg, strconv.Quote(subject)) || !strings.Contains(msg, `"test"`) {
+			t.Errorf("%s: Read yielded %v, want it to name the subject and the prefix test", subject, errs[0])
+		}
+	}
+}

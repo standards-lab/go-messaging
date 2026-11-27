@@ -40,7 +40,7 @@ func (b *Broker) Subscribe(sub messaging.Subscription, report messaging.Report) 
 		return nil, err
 	}
 	for _, t := range sub.Types {
-		if err := b.namespaced(t); err != nil {
+		if err := b.namespaced("type", t); err != nil {
 			return nil, fmt.Errorf("nats: subscribe %s: %w", sub.Name, err)
 		}
 	}

@@ -7,6 +7,31 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-11-27
+
+### Added
+
+- `Journal`, which a provider implements beside `Broker` on the same stream. `Append` stores a
+  stamped event on a subject the caller names when the subject's last stream sequence is the
+  expected one, 0 for a subject with no event, and returns the event's sequence. `Read` yields a
+  subject's events after a sequence, in order, ending at the subject's last event as it stood
+  when the read began. An append checks the expected sequence before the deduplication window it
+  shares with `Publish`. A retry of an append already stored returns the stored event's
+  sequence when the expected sequence matches or the event is still the subject's last, and
+  otherwise conflicts.
+- `Entry`, an event read from a journal subject with its stream sequence, and `ErrConflict`, the
+  error an append wraps when the subject's last sequence is not the expected one.
+- `memory.Broker.Append` and `memory.Broker.Read`: the memory provider is a `Journal`.
+- `messagingtest.RunJournal`, the journal's conformance suite, for a provider that is both a
+  `Broker` and a `Journal`.
+
+### Changed
+
+- The memory provider numbers its log from 1, like a stream's sequences, and keeps each event on
+  a subject: its type when published, the caller's subject when appended. A subscription's type
+  filter matches the subject.
+- The `sqlate` requirement is v0.8.0.
+
 ## [v0.3.0] - 2026-11-11
 
 Configuration is one value, not variadic option functions or a long parameter list: a service's
@@ -183,7 +208,8 @@ v0.7.0, which make the same change to their own constructors and transactions.
 - The base module depends on the standard library, go-core, and sqlate and sqlate/query, which
   depguard enforces.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/standards-lab/go-messaging/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/standards-lab/go-messaging/releases/tag/v0.1.0

@@ -1,5 +1,6 @@
 // Package messaging is the standard tier's broker operations: publishing an
-// event and subscribing to events as a reactor source.
+// event, subscribing to events as a reactor source, and appending to and
+// reading back a subject of the broker's stream.
 //
 // The package exports:
 //
@@ -7,6 +8,10 @@
 //     also subscribes reactors; [Encode], the check and encoding every
 //     provider's Publish makes; and [DefaultDuplicates], a broker's
 //     deduplication window when it sets none
+//   - [Journal], which appends events to subjects, each append guarded by
+//     its subject's last stream sequence, and reads a subject back as
+//     [Entry] values; and [ErrConflict], the error of an append whose
+//     expected sequence is not the subject's last
 //   - [Subscription], a durable consumer, with [Subscription.Validate],
 //     [Subscription.Normalize], the form a provider configures its consumer
 //     from, and [Subscription.Matches], its type filter; [Start], where a new
@@ -61,11 +66,11 @@
 //
 // The package imports no broker and no engine: the composition root hands
 // them to [Setup]. A provider, such as the memory package, implements
-// [Broker], and the messagingtest package holds the conformance suite every
-// provider passes. The outbox and inbox packages run their tables on any
-// engine that supplies the statements; the postgres sub-module is that
-// engine for PostgreSQL, and the nats sub-module is the NATS JetStream
-// provider.
+// [Broker] and, on the same stream, [Journal], and the messagingtest
+// package holds the conformance suites every provider passes. The outbox and
+// inbox packages run their tables on any engine that supplies the
+// statements; the postgres sub-module is that engine for PostgreSQL, and the
+// nats sub-module is the NATS JetStream provider.
 //
 // The base module depends on the standard library, go-core, and sqlate and
 // its query package, the adjacent library the outbox's and inbox's engine
