@@ -7,6 +7,11 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- The module requires `sqlate` v0.8.0 and `sqlate/postgres` v0.9.0, and its `sqlint` tool is
+  v0.5.0; the dialect's API is unchanged.
+
 ## [v0.4.0] - 2026-11-17
 
 ### Changed

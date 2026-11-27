@@ -7,6 +7,10 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+### Changed
+
+- The `sqlate` requirement is v0.8.0.
+
 ## [v0.3.0] - 2026-11-11
 
 Configuration is one value, not variadic option functions or a long parameter list: a service's

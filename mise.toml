@@ -8,7 +8,7 @@ go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
 "aqua:google/go-containerregistry" = "0.22.1"
-"github:standards-lab/claude-plugins" = { version = "0.24.0", version_prefix = "marathon/v" }
+"github:standards-lab/claude-plugins" = { version = "0.24.1", version_prefix = "marathon/v" }
 
 [env]
 GO_MODULES = ". postgres nats"
