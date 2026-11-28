@@ -301,8 +301,8 @@ func TestRecorderEmitsIntoTheCommandsTransaction(t *testing.T) {
 			if _, err := tx.ExecContext(t.Context(), `SELECT 1`); err != nil {
 				return 0, err
 			}
-			kindTicked.Raise(q, "ex-1", ticked{N: 1})
-			kindTicked.Raise(q, "ex-1", ticked{N: 2})
+			kindTicked.Raise(q, "ex-1", ticked{N: 1}, event.RaiseOptions{})
+			kindTicked.Raise(q, "ex-1", ticked{N: 2}, event.RaiseOptions{})
 			return 2, fail
 		}
 	}

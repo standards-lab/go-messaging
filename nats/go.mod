@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/nats-io/nats.go v1.56.0
-	github.com/standards-lab/go-core v0.12.0
+	github.com/standards-lab/go-core v0.13.0
 	github.com/standards-lab/go-messaging v0.5.0
 	github.com/standards-lab/sqlate v0.8.0
 )

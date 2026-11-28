@@ -7,6 +7,22 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-11-27
+
+### Added
+
+- `Setup.Recorder`, the `event.Options` that `Runtime.Recorder` is built with: its clock, its
+  event ids, and the extension attributes it stamps on every event it emits, a raise's value
+  winning where a name repeats. The zero value records as before. An extension name the event
+  rules reject panics `Build`, a wiring mistake.
+
+### Changed
+
+- **Breaking:** The `go-core` requirement is v0.13.0, whose `EventKind.Raise` takes a trailing
+  `event.RaiseOptions`, and which adds `event.Options.Extensions` for a recorder's service-wide
+  extension attributes. A raise with no extension attributes passes `event.RaiseOptions{}`.
+  go-core's changelog migrates each.
+
 ## [v0.5.0] - 2026-11-27
 
 ### Added
@@ -246,7 +262,8 @@ v0.7.0, which make the same change to their own constructors and transactions.
 - The base module depends on the standard library, go-core, and sqlate and sqlate/query, which
   depguard enforces.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/standards-lab/go-messaging/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-messaging/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/v0.2.0...v0.3.0

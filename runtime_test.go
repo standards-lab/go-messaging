@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -126,6 +127,107 @@ func TestBuildPanicsOnANilBrokerOrLogger(t *testing.T) {
 
 type payload struct {
 	N int `json:"n"`
+}
+
+var recorded = event.Define[payload]("recorded")
+
+func emitted(t *testing.T, s messaging.Setup, raises ...event.RaiseOptions) []event.Event {
+	t.Helper()
+	responses := make([]sqltest.Response, len(raises))
+	for i := range responses {
+		responses[i] = sqltest.Response{Affected: 1}
+	}
+	pool, rec := sqltest.Open(t, responses...)
+	db := sqlate.Wrap(pool, sqltest.Dialect{})
+	rt := build(t, s)
+	_, err := sqlate.Transact(t.Context(), db, rt.Recorder.Emit(t.Context(), func(_ *sqlate.Tx, q *event.Queue) (struct{}, error) {
+		for i, opts := range raises {
+			recorded.Raise(q, "s", payload{N: i}, opts)
+		}
+		return struct{}{}, nil
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var es []event.Event
+	for _, c := range rec.Calls() {
+		if c.Op != sqltest.OpExec {
+			continue
+		}
+		var h event.Header
+		if err := json.Unmarshal(c.Args[2].([]byte), &h); err != nil {
+			t.Fatal(err)
+		}
+		e, err := event.Decode(h, c.Args[3].([]byte))
+		if err != nil {
+			t.Fatal(err)
+		}
+		es = append(es, e)
+	}
+	if len(es) != len(raises) {
+		t.Fatalf("the sink got %d events, want %d", len(es), len(raises))
+	}
+	return es
+}
+
+func TestZeroRecorderStampsNoExtensions(t *testing.T) {
+	s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+	for _, e := range emitted(t, s, event.RaiseOptions{}, event.RaiseOptions{}) {
+		if e.Extensions != nil || e.Source != "/test" || e.ID == "" || e.Time.IsZero() {
+			t.Errorf("event = %+v, want one stamped with the source, an id, and a time, and no extensions", e)
+		}
+	}
+}
+
+func TestRecorderExtensionsAreStampedOnEveryEvent(t *testing.T) {
+	s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+	s.Recorder = event.Options{Extensions: map[string]string{"layer": "billing"}}
+	got := emitted(t, s, event.RaiseOptions{}, event.RaiseOptions{Extensions: map[string]string{"correlationid": "c1"}})
+	want := []map[string]string{
+		{"layer": "billing"},
+		{"layer": "billing", "correlationid": "c1"},
+	}
+	for i, e := range got {
+		if !maps.Equal(e.Extensions, want[i]) {
+			t.Errorf("event %d extensions = %v, want %v", i, e.Extensions, want[i])
+		}
+	}
+}
+
+func TestARaiseOverridesTheRecorderExtension(t *testing.T) {
+	s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+	s.Recorder = event.Options{Extensions: map[string]string{"layer": "billing"}}
+	got := emitted(t, s, event.RaiseOptions{Extensions: map[string]string{"layer": "domain"}})
+	if want := map[string]string{"layer": "domain"}; !maps.Equal(got[0].Extensions, want) {
+		t.Errorf("extensions = %v, want %v, the raise's value", got[0].Extensions, want)
+	}
+}
+
+func TestRecorderClockAndIDsAreStamped(t *testing.T) {
+	at := time.Date(2026, 11, 27, 9, 30, 0, 0, time.FixedZone("x", 3600))
+	var n int
+	s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+	s.Recorder = event.Options{
+		Clock: func() time.Time { return at },
+		IDs:   func() string { n++; return "id" + strconv.Itoa(n) },
+	}
+	for i, e := range emitted(t, s, event.RaiseOptions{}, event.RaiseOptions{}) {
+		if want := "id" + strconv.Itoa(i+1); e.ID != want || !e.Time.Equal(at) {
+			t.Errorf("event %d = %s at %v, want %s at %v", i, e.ID, e.Time, want, at)
+		}
+	}
+}
+
+func TestBuildPanicsOnAnInvalidRecorderExtension(t *testing.T) {
+	s := setup(t, memory.New(), slog.New(slog.DiscardHandler))
+	s.Recorder = event.Options{Extensions: map[string]string{"Layer": "billing"}}
+	defer func() {
+		got, _ := recover().(string)
+		if !strings.HasPrefix(got, "event: recorder: Options.Extensions: ") || !strings.Contains(got, `"Layer"`) {
+			t.Errorf("Build panicked with %q, want the recorder's panic naming \"Layer\"", got)
+		}
+	}()
+	_, _ = s.Build()
 }
 
 func TestConsume(t *testing.T) {

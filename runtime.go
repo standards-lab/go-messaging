@@ -44,8 +44,9 @@ type Runtime struct {
 }
 
 // Setup is what [Setup.Build] builds a service's [Runtime] from. Config,
-// Broker, Outbox, Inbox, Shutdown, and Logger are required; OnFailure and
-// Gate are optional, and nil selects their default.
+// Broker, Outbox, Inbox, Shutdown, and Logger are required; Recorder,
+// OnFailure, and Gate are optional, and their zero value selects their
+// default.
 type Setup struct {
 	// Config is the service's messaging block, which must be finalized.
 	Config Config
@@ -63,6 +64,12 @@ type Setup struct {
 	Shutdown time.Duration
 	// Logger is what the runtime logs to; it must not be nil.
 	Logger *slog.Logger
+	// Recorder configures [Runtime.Recorder]: its clock, its event ids, and
+	// the extension attributes it stamps on every event it emits, such as
+	// the layer that emitted it. A raise that sets the same extension name
+	// carries the raise's value. The zero value stamps the time from
+	// time.Now, mints version 7 UUIDs, and stamps no extension attributes.
+	Recorder event.Options
 	// OnFailure is the hook the runtime reports each [Failure] to. When it
 	// is nil, the runtime logs each failure at warn on Logger, as "messaging
 	// failure". The default logs every failure it is given, so during an
@@ -102,10 +109,12 @@ type Setup struct {
 }
 
 // Build builds the service's messaging that s describes. It panics, before
-// anything else, when Broker or Logger is nil, a wiring mistake in the
-// caller. It returns an error for a Config that does not validate, a
-// Shutdown that is not positive, or an Outbox or Inbox engine missing a
-// statement. It does no I/O.
+// anything else, when Broker or Logger is nil, and, once Config, Shutdown,
+// Outbox, and Inbox are checked, when Recorder names an extension that
+// [event.Event.Validate] rejects: each a wiring mistake in the caller. It
+// returns an error for a Config that does not validate, a Shutdown that is
+// not positive, or an Outbox or Inbox engine missing a statement. It does
+// no I/O.
 func (s Setup) Build() (*Runtime, error) {
 	if s.Broker == nil {
 		panic("messaging: Setup.Broker is nil")
@@ -132,7 +141,7 @@ func (s Setup) Build() (*Runtime, error) {
 		hook = logFailures(s.Logger)
 	}
 	return &Runtime{
-		Recorder: event.NewRecorder(ob.Sink(), s.Config.Source, event.Options{}),
+		Recorder: event.NewRecorder(ob.Sink(), s.Config.Source, s.Recorder),
 		broker:   s.Broker,
 		outbox:   ob,
 		inbox:    in,

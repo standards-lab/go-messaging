@@ -7,10 +7,18 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-27
+
 ### Changed
 
 - The module requires `sqlate` v0.8.0 and `sqlate/postgres` v0.9.0, and its `sqlint` tool is
   v0.5.0; the dialect's API is unchanged.
+- **Breaking:** The `go-core` requirement is v0.13.0, whose `EventKind.Raise` takes a trailing
+  `event.RaiseOptions`, and which adds `event.Options.Extensions` for a recorder's service-wide
+  extension attributes. A raise with no extension attributes passes `event.RaiseOptions{}`.
+  go-core's changelog migrates each.
+- The `go-messaging` requirement is v0.5.0, which adds the work-queue contract; the outbox and
+  inbox are unchanged.
 
 ## [v0.4.0] - 2026-11-17
 
@@ -91,7 +99,8 @@ changelog covers this sub-module only; the base module keeps its own.
 - The module requires `go-messaging` v0.1.0, `sqlate` and `sqlate/postgres` v0.5.0, and pgx
   v5.11.0, with the `sqlate/sqlint` tool at v0.3.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.4.0...postgres/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.3.0...postgres/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.2.0...postgres/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.1.0...postgres/v0.2.0

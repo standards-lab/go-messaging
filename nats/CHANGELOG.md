@@ -7,6 +7,15 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-11-27
+
+### Changed
+
+- **Breaking:** The `go-core` requirement is v0.13.0, whose `EventKind.Raise` takes a trailing
+  `event.RaiseOptions`, and which adds `event.Options.Extensions` for a recorder's service-wide
+  extension attributes. A raise with no extension attributes passes `event.RaiseOptions{}`.
+  go-core's changelog migrates each.
+
 ## [v0.5.0] - 2026-11-27
 
 ### Added
@@ -122,7 +131,8 @@ changelog covers this sub-module only; the base module keeps its own.
   (`nats:2.15.1-alpine`, JetStream on tmpfs), through `mise run integration:nats`.
 - The module requires `go-messaging` v0.1.0, go-core v0.10.0, and nats.go v1.54.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.5.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.6.0...HEAD
+[v0.6.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.5.0...nats/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.4.0...nats/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.3.0...nats/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...nats/v0.3.0

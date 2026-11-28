@@ -13,10 +13,10 @@ github.com/jackc/puddle/v2 v2.2.3 h1:f8HoREISb3l5eO9coPgK7U3hKLhWGokOFVcThl5jrao
 github.com/jackc/puddle/v2 v2.2.3/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/standards-lab/go-core v0.12.0 h1:sqrzK6QSppEYpwvVAyiWgzNuOsjfK0Kwe86GPuZpHsU=
-github.com/standards-lab/go-core v0.12.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
-github.com/standards-lab/go-messaging v0.3.0 h1:5UAJHAtwYKS831JZd7AprxSm7gwY2XkGMN7Q0s7gwag=
-github.com/standards-lab/go-messaging v0.3.0/go.mod h1:iHLhl5KIc8w9v2uhLxH1l4Rld9dHI1FjaApo3WwpKUE=
+github.com/standards-lab/go-core v0.13.0 h1:jYiUiE63Z4/3q+8e+ATE+MuqI40RrI4BZrlD/sdm/Zg=
+github.com/standards-lab/go-core v0.13.0/go.mod h1:Yl/R+gM9YWczsePBCKXdPGh3FSdZ/5i8SapLIh3BDHU=
+github.com/standards-lab/go-messaging v0.5.0 h1:gh1oILYFn3wWHRnueYFrnagwSGsdfCETqH7/GJTjjiA=
+github.com/standards-lab/go-messaging v0.5.0/go.mod h1:w5bhvj9yMl+30D+tJj58BUOgJ7X5y0pyoQNwORB/1lM=
 github.com/standards-lab/sqlate v0.8.0 h1:G1uUIWmc2DxJz5YhtBvIlftfURnb3b2RKsYB59Wa03Y=
 github.com/standards-lab/sqlate v0.8.0/go.mod h1:pikNmGf/z3x46SBWFXgt/xKIDZuquSgCoXy5OWBFFR4=
 github.com/standards-lab/sqlate/postgres v0.9.0 h1:l6PXEZ3GQM4+0zekxlSONhyHjpQU8g8StAS16bBqzZE=
