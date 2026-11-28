@@ -7,6 +7,38 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-27
+
+### Added
+
+- `Queue`, with `NewQueue` and its `QueueConfig` block: a `messaging.Queue` on a stream with
+  work-queue retention, a lifecycle component that does no I/O until `Start`. The owner creates
+  or updates the stream on file storage over the work subject, the dead-letter subject, and every
+  subject under it; a non-owner binds the stream as it finds it. `Enqueue` stores an event on the
+  work subject with its source and id as `Nats-Msg-Id`. The workers under one name share one
+  durable pull consumer with no server delivery limit, and a work-queue stream takes one worker
+  group per subject. Each worker holds one job at a time, extends its delivery while the handler
+  runs, ends the handler's context when no extension is answered for AckWait, acknowledges a
+  nil, and naks an error with the attempt's retry delay. A permanent error, an error on the
+  final attempt, any delivery past it, which the worker dead-letters without running the
+  handler, and a message that does not decode dead-letter the job: the message, unchanged but
+  for the dead-letter headers, is published on the worker's dead-letter subject with a
+  `Nats-Msg-Id` of its own, so it is stored once, and the job is acknowledged only after the
+  stream holds it. A failed publish naks the job, and its next delivery is its next attempt:
+  past the final attempt it dead-letters again without the handler, and before it the handler
+  runs again, so the job always ends as a dead letter. `Subscribe` rejects a worker whose
+  AckWait plus `AckMargin` is not less than `messaging.DefaultDuplicates`, so a dead letter
+  repeated after a lost acknowledgement falls within the deduplication window; AckWait bounds a
+  delivery between extensions, not a job's run time. A worker on a dead-letter subject puts each
+  dead letter's `messaging.DeadLetter` on the handler's context. The provider passes
+  `messagingtest.RunQueue`.
+- `natstest.ScratchQueue`, a stream and a work queue's subjects unique to the test.
+
+### Changed
+
+- `ErrNotStarted` and `ErrStarted` also name a `Queue` that is not started, or started twice.
+- Requires go-messaging v0.5.0, for the work-queue contract.
+
 ## [v0.4.0] - 2026-11-27
 
 ### Added
@@ -90,7 +122,8 @@ changelog covers this sub-module only; the base module keeps its own.
   (`nats:2.15.1-alpine`, JetStream on tmpfs), through `mise run integration:nats`.
 - The module requires `go-messaging` v0.1.0, go-core v0.10.0, and nats.go v1.54.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.4.0...nats/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.3.0...nats/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...nats/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.1.0...nats/v0.2.0

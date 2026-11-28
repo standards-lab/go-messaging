@@ -277,3 +277,185 @@ second broker, with that stream's `Config`. An appended event is a message on th
 published one, so it reaches the stream's subscriptions. A subscription's type filter matches the
 subject an event is on, not its type, so a consumer of appended events names their subjects in its
 `Types`.
+
+## The work queue
+
+A `messaging.Queue` holds durable jobs apart from the broker's stream: each event enqueued waits
+until one worker of a group acknowledges it, or until the queue dead-letters it. A service
+enqueues a job with the event that describes it, stamped with its source, id, and type:
+
+```go
+err := queue.Enqueue(ctx, e) // returns once the queue holds e
+```
+
+`Enqueue` rejects what `messaging.Encode` rejects, as `Publish` does, and deduplicates the same
+way: an event whose source and id the queue has seen within its window,
+`messaging.DefaultDuplicates`, is accepted and stored once, so after an error that leaves an
+enqueue's outcome unknown the service retries with the same event.
+
+### Workers
+
+A `messaging.Worker` is a durable group of workers: every source subscribed under its `Name`
+shares the queue's jobs, and each member holds one job at a time.
+
+```go
+w := messaging.Worker{
+	Name:       "render",           // the group; passes messaging.CheckName
+	MaxDeliver: 5,                  // attempts on one job; attempt 5 is the final one
+	AckWait:    time.Minute,        // a delivery's life with no successful extension; 0 is DefaultAckWait
+	Backoff:    []time.Duration{time.Second, 10 * time.Second, time.Minute},
+	DeadLetter: "jobs.billing.dead", // where the group's dead letters are stored
+}
+```
+
+`Subject` is empty for the jobs enqueued, or a dead-letter subject for a dead-letter worker
+([Dead letters](#dead-letters)). `Worker.Validate` reports every way a worker is unusable,
+together: a `Name` that fails `messaging.CheckName`, a set `Subject` or a `DeadLetter` that fails
+`messaging.CheckType`, a `MaxDeliver` that is not positive, a negative `AckWait` or `Backoff`
+entry, and a `DeadLetter` that is missing or is the worker's own `Subject`. The queue's
+`Subscribe` validates the worker and fails on an unusable one, so `Runtime.Work` does too.
+
+The NATS queue's `Subscribe` also rejects an `AckWait` of 1m59.75s or more, which is
+`messaging.DefaultDuplicates` less `nats.AckMargin`, and its error names that bound. A dead
+letter repeated after a lost acknowledgement comes `AckWait` plus the margin later, and the
+stream drops the repeat only within its deduplication window. `AckWait` is how long a delivery
+lasts between extensions, not how long the job may run, so a job that runs for hours keeps an
+`AckWait` well inside the bound.
+
+`Worker.RetryDelay(n)` is how long a job waits after failed attempt `n`: `Backoff[n-1]`; the last
+entry once `n` passes the end of `Backoff`; and 0, a redelivery at once, when `Backoff` is empty.
+
+`rt.Work` builds the reactor that runs a worker group's jobs, the queue's counterpart of
+`rt.Consume`. It decodes each job's data into the worker's own type and hands it to the handler;
+data that does not decode is refused with `event.Permanent`, so the job dead-letters:
+
+```go
+render := g.Define("render", func(s *graph.Scope) (*reactor.Reactor[event.Event], error) {
+	return s.Use(runtime).Work(s.Use(queue), w, func(ctx context.Context, job RenderJob) error {
+		// ... the job's work, stopping when ctx ends ...
+		return nil
+	})
+})
+```
+
+The reactor logs each delivery with the worker, the event's type, id, and subject, its attempt,
+and its outcome: `job worked` at info when handled or retried, `job refused` at warn for a
+permanent error, and `job exhausted` at warn for an error on the final attempt. It reports each
+error its source survives to the hook as a `source` failure naming the worker. Under a
+`Setup.Gate`, each delivery holds the gate for the handler's whole call, as a consumer's does.
+The job's delivery is extended while it waits for the gate; when the drain or the delivery's end
+ends the wait, the handler is not called and the job is left for redelivery. `Setup` still needs
+its `Broker`, its outbox, and its inbox: the queue is given to `Work`, not to `Setup`.
+
+### Extension and the handler's context
+
+While the handler runs, the queue extends the job's delivery, so a long job keeps its claim; the
+handler is given no way to extend it. The NATS queue sends an in-progress acknowledgement four
+times per `AckWait`; the memory queue's extension always succeeds. When no extension has
+succeeded for `AckWait`, as when the server is unreachable, the handler's context ends and the
+job is left for redelivery to any member. The handler stops when its context ends, since its
+outcome after that is ignored. The context also ends when the reactor drains. A drained
+handler's nil still acknowledges its job and a permanent error still dead-letters it; any other
+error leaves the job for redelivery at once.
+
+A reactor detaches its handler from the source's cancellation, so the queue puts the delivery's
+end on the handler's context and `Runtime.Work` ends the context from it: the handler need not
+read `messaging.DeliveryEnd` itself.
+
+### Outcomes
+
+The handler's return is the job's outcome:
+
+- nil acknowledges the job, which leaves the queue.
+- An error redelivers it after `Worker.RetryDelay` of its attempt.
+- An error wrapped with `event.Permanent` dead-letters it, on any attempt.
+- Any error on the final attempt dead-letters it. `messaging.Attempt(ctx)` reads the attempt,
+  from 1, and `w.Final(ctx)` reports whether it is the last, the attempt numbered `MaxDeliver`.
+- A final attempt that ends with no outcome, because the worker drained with an error or lost its
+  extension, dead-letters the job on its next delivery, without calling the handler.
+
+A job leaves the queue only once its dead letter is stored. When the store fails, the job stays
+and is delivered again, after its attempt's `RetryDelay`, as its next attempt: a delivery past
+the final attempt, or of a message that does not decode, dead-letters it again without calling
+the handler, and any other delivery calls the handler again, as after a permanent error on an
+earlier attempt. So a job past its final attempt always ends as a dead letter.
+
+### Dead letters
+
+A dead letter is the original event, unchanged, stored on the worker's `DeadLetter` subject with
+three headers, which `messaging.ReadDeadLetter` reads back as a `messaging.DeadLetter`:
+
+- `messaging-attempts` (`HeaderAttempts`): how many attempts were made, in decimal.
+- `messaging-outcome` (`HeaderOutcome`): how the last attempt ended, `error` (`OutcomeError`) or
+  `no-error` (`OutcomeNoError`) when it ended with no outcome.
+- `messaging-last-error` (`HeaderLastError`): the last attempt's error, with CR and LF written as
+  spaces, present only on `error`.
+
+The names carry no `ce-` prefix, so the event decodes from the dead letter unchanged. A dead
+letter is stored once however often dead-lettering repeats, and is never a duplicate of the
+event's enqueue.
+
+A dead-letter worker takes them off: its `Subject` is the dead-letter subject, and its own
+`DeadLetter` another. Its handler's context carries each dead letter's `messaging.DeadLetter`,
+which `messaging.DeadLetterOf` reads, and its nil acknowledges the dead letter off the queue:
+
+```go
+dead := messaging.Worker{
+	Name:       "render-dead",
+	Subject:    "jobs.billing.dead",
+	MaxDeliver: 3,
+	DeadLetter: "jobs.billing.dead.parked",
+}
+r, err := rt.Work(queue, dead, func(ctx context.Context, job RenderJob) error {
+	d, _ := messaging.DeadLetterOf(ctx)
+	// ... record or repair the job, from d.Attempts, d.Errored, and d.Err ...
+	return nil
+})
+```
+
+### Memory and NATS
+
+`memory.NewQueue()` returns an empty in-memory queue, for a service's tests and the conformance
+double. It has no lifecycle, its extension always succeeds, and nothing persists beyond the
+process. Both providers pass `messagingtest.RunQueue`.
+
+The `nats` sub-module's `Queue` keeps its jobs on a JetStream stream of its own with work-queue
+retention, so an acknowledged job leaves the stream. Its `QueueConfig` is the service's queue
+block, finalized as the broker's `Config` is, its environment overrides
+`<PREFIX>_NATS_QUEUE_URL`, `…_NAME`, `…_STREAM`, `…_SUBJECT`, `…_DEAD_LETTER`, `…_OWNER`, and
+`…_MAX_AGE`:
+
+```go
+owner := true // the one service that owns the queue's stream
+qcfg := nats.QueueConfig{Stream: "billing_jobs", Subject: "jobs.billing.render", DeadLetter: "jobs.billing.dead", Owner: &owner}
+err := qcfg.Finalize("BILLING") // defaults url, reads BILLING_NATS_QUEUE_*, and validates
+
+queue, err := nats.NewQueue(qcfg) // no I/O: Start connects, at the lowest stage
+```
+
+`subject` is where `Enqueue` stores each job, and `dead_letter` the queue's dead-letter subject:
+a worker's `DeadLetter`, and a dead-letter worker's `Subject`, must be it or under it, which
+`Subscribe` checks. `subject` must not be `dead_letter` or under it. The stream's subjects must
+not overlap another stream's on the server, so the queue's subjects sit outside the broker's
+prefix.
+
+As with the broker, one service owns the stream: its `Start` creates the stream or updates it
+to its config, on file storage with work-queue retention, the subjects `subject`,
+`dead_letter`, and `dead_letter.>`, the deduplication window `messaging.DefaultDuplicates`, and
+the retention `max_age`. Every other service leaves `owner` unset or false: its queue binds the
+stream as it finds it and writes nothing, and its `Start` fails when the stream is missing, is
+not a work queue, or does not capture those subjects. Only the owner sets `max_age`, which
+discards a job older than it whether or not a worker has taken it, and must be 0 or at least the
+deduplication window. In JSON, under the key the service gives the block:
+
+```json
+{"queue": {"url": "nats://nats:4222", "stream": "billing_jobs", "subject": "jobs.billing.render", "dead_letter": "jobs.billing.dead", "owner": true, "max_age": "168h"}}
+```
+
+The queue is a lifecycle node of the graph, started before every reactor on it; a call that
+reaches it before `Start` fails with `nats.ErrNotStarted`.
+
+The workers under one `Name` share one durable pull consumer, and a work-queue stream refuses a
+second consumer whose subject overlaps the first's: one worker group takes each subject. A
+second group on the work subject fails at its first `Receive`, so a service that needs two kinds
+of work enqueues them on two queues.

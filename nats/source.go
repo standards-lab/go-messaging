@@ -45,7 +45,7 @@ func (b *Broker) Subscribe(sub messaging.Subscription, report messaging.Report) 
 		}
 	}
 	sub = sub.Normalize()
-	return &source{b: b, sub: sub, cfg: b.consumerConfig(sub), report: report}, nil
+	return &source{b: b, sub: sub, name: sub.Name, stream: b.cfg.Stream, cfg: b.consumerConfig(sub), report: report}, nil
 }
 
 func (b *Broker) consumerConfig(sub messaging.Subscription) jetstream.ConsumerConfig {
@@ -70,11 +70,9 @@ func (b *Broker) consumerConfig(sub messaging.Subscription) jetstream.ConsumerCo
 
 // See docs/internals.md
 type source struct {
-	b      *Broker
-	sub    messaging.Subscription
-	cfg    jetstream.ConsumerConfig
-	report messaging.Report
-	ready  atomic.Bool
+	puller
+	b   *Broker
+	sub messaging.Subscription
 }
 
 func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) error {
@@ -82,15 +80,27 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 	if c == nil {
 		return ErrNotStarted
 	}
-	cons, err := c.js.CreateConsumer(ctx, s.b.cfg.Stream, s.cfg)
+	return s.receive(ctx, c, func(ctx context.Context, msg jetstream.Msg) { s.deliver(ctx, msg, fn) })
+}
+
+type puller struct {
+	name   string
+	stream string
+	cfg    jetstream.ConsumerConfig
+	report messaging.Report
+	ready  atomic.Bool
+}
+
+func (p *puller) receive(ctx context.Context, c *conn, deliver func(context.Context, jetstream.Msg)) error {
+	cons, err := c.js.CreateConsumer(ctx, p.stream, p.cfg)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
-		return fmt.Errorf("nats: bind consumer %s: %w", s.sub.Name, err)
+		return fmt.Errorf("nats: bind consumer %s: %w", p.name, err)
 	}
-	s.ready.Store(true)
-	defer s.ready.Store(false)
+	p.ready.Store(true)
+	defer p.ready.Store(false)
 	failures := 0
 	for ctx.Err() == nil {
 		pctx, cancel := context.WithTimeout(ctx, pullWait)
@@ -99,26 +109,26 @@ func (s *source) Receive(ctx context.Context, fn reactor.Func[event.Event]) erro
 		switch {
 		case err == nil:
 			failures = 0
-			s.ready.Store(true)
-			s.deliver(ctx, msg, fn)
+			p.ready.Store(true)
+			deliver(ctx, msg)
 		case ctx.Err() != nil:
 		case empty(err) && c.nc.IsConnected():
 			failures = 0
-			s.ready.Store(true)
+			p.ready.Store(true)
 		case errors.Is(err, natsgo.ErrConnectionClosed), errors.Is(err, jetstream.ErrConsumerDeleted):
-			return fmt.Errorf("nats: receive %s: %w", s.sub.Name, err)
+			return fmt.Errorf("nats: receive %s: %w", p.name, err)
 		case empty(err) && c.nc.IsClosed():
-			return fmt.Errorf("nats: receive %s: %w", s.sub.Name, natsgo.ErrConnectionClosed)
+			return fmt.Errorf("nats: receive %s: %w", p.name, natsgo.ErrConnectionClosed)
 		default:
 			if empty(err) {
 				err = fmt.Errorf("connection %s: %w", c.nc.Status(), err)
 			}
-			s.ready.Store(false)
-			s.reportf(ctx, "pull: %w", err)
+			p.ready.Store(false)
+			p.reportf(ctx, "pull: %w", err)
 			failures++
 			if c.nc.IsConnected() && (errors.Is(err, natsgo.ErrNoResponders) || failures >= failuresBeforeCheck) {
-				if gone := s.gone(ctx, cons); gone != nil {
-					return fmt.Errorf("nats: receive %s: %w", s.sub.Name, gone)
+				if cause := gone(ctx, cons); cause != nil {
+					return fmt.Errorf("nats: receive %s: %w", p.name, cause)
 				}
 			}
 			select {
@@ -134,7 +144,7 @@ func empty(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, natsgo.ErrTimeout) || errors.Is(err, jetstream.ErrNoMessages)
 }
 
-func (s *source) gone(ctx context.Context, cons jetstream.Consumer) error {
+func gone(ctx context.Context, cons jetstream.Consumer) error {
 	ictx, cancel := context.WithTimeout(ctx, pullWait)
 	defer cancel()
 	_, err := cons.Info(ictx)
@@ -180,17 +190,17 @@ func (s *source) deliver(ctx context.Context, msg jetstream.Msg, fn reactor.Func
 	}
 }
 
-func (s *source) settle(ctx context.Context, msg jetstream.Msg, what string, send func() error) {
+func (p *puller) settle(ctx context.Context, msg jetstream.Msg, what string, send func() error) {
 	if err := send(); err != nil {
-		s.reportf(ctx, "%s message on %s: %w", what, msg.Subject(), err)
+		p.reportf(ctx, "%s message on %s: %w", what, msg.Subject(), err)
 	}
 }
 
-func (s *source) reportf(ctx context.Context, format string, args ...any) {
-	if s.report == nil {
+func (p *puller) reportf(ctx context.Context, format string, args ...any) {
+	if p.report == nil {
 		return
 	}
-	s.report(ctx, fmt.Errorf("nats: %s: "+format, append([]any{s.sub.Name}, args...)...))
+	p.report(ctx, fmt.Errorf("nats: %s: "+format, append([]any{p.name}, args...)...))
 }
 
-func (s *source) Ready() bool { return s.ready.Load() }
+func (p *puller) Ready() bool { return p.ready.Load() }

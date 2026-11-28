@@ -1,6 +1,7 @@
 // Package messaging is the standard tier's broker operations: publishing an
-// event, subscribing to events as a reactor source, and appending to and
-// reading back a subject of the broker's stream.
+// event, subscribing to events as a reactor source, appending to and reading
+// back a subject of the broker's stream, and holding durable jobs in a work
+// queue.
 //
 // The package exports:
 //
@@ -12,6 +13,21 @@
 //     its subject's last stream sequence, and reads a subject back as
 //     [Entry] values; and [ErrConflict], the error of an append whose
 //     expected sequence is not the subject's last
+//   - [Queue], which holds durable jobs until a worker acknowledges or the
+//     queue dead-letters them; [Worker], a durable group of workers on it,
+//     with [Worker.Validate], [Worker.Normalize], the form a provider
+//     configures its group from, [Worker.RetryDelay], an attempt's backoff,
+//     and [Worker.Final], whether a delivery is the last attempt
+//   - [DeadLetter], what a dead letter's headers say of its attempts, with
+//     [DeadLetter.Header], which writes them, and [ReadDeadLetter], which
+//     reads them; the header names [HeaderAttempts], [HeaderOutcome], and
+//     [HeaderLastError], and the outcomes [OutcomeError] and
+//     [OutcomeNoError]; [WithDeadLetter], which a provider calls to put a
+//     dead letter's DeadLetter on its handler's context, and
+//     [DeadLetterOf], which reads it
+//   - [WithDeliveryEnd], which a provider calls to put the end of a
+//     queue's delivery on its handler's context, and [DeliveryEnd], which
+//     reads it
 //   - [Subscription], a durable consumer, with [Subscription.Validate],
 //     [Subscription.Normalize], the form a provider configures its consumer
 //     from, and [Subscription.Matches], its type filter; [Start], where a new
@@ -25,9 +41,10 @@
 //     [Config.Finalize], and [Config.Validate]; [DefaultRelayPoll] and
 //     [DefaultRelayTimeout]
 //   - [Runtime], one service's messaging, which [Setup.Build] builds from a
-//     [Setup]; [Runtime.Relay], the reactor that publishes the outbox; and
+//     [Setup]; [Runtime.Relay], the reactor that publishes the outbox;
 //     [Runtime.Consume], which builds a consuming reactor, handing its
-//     handler a [Claim] over the inbox
+//     handler a [Claim] over the inbox; and [Runtime.Work], which builds a
+//     work queue's worker reactor
 //   - [Failure], a failure the runtime survives, and [FailureKind], what
 //     failed: [FailureRelay], [FailureQuarantine], [FailureSource], or
 //     [FailureExhausted]
@@ -46,21 +63,33 @@
 // and [Attempt] reads which delivery of the event the handler is on. A
 // source passes the errors it survives to the [Report] given to Subscribe.
 //
+// # Work queues
+//
+// A [Queue] holds durable jobs apart from the broker's stream: each event
+// enqueued waits until one worker of a [Worker] group acknowledges it, or
+// until the queue dead-letters it onto the group's dead-letter subject,
+// where a later worker takes it off. The contract names no broker, so a
+// provider meets it on whatever store holds the jobs. A reactor detaches
+// its handler from the source's cancellation, so a provider also puts the
+// delivery's end on the handler's context, which [DeliveryEnd] reads, and
+// [Runtime.Work] ends its handler's context from it.
+//
 // # The runtime
 //
 // A [Runtime] is one service's messaging: the broker, the outbox and inbox
 // over its database engine's statements, and the recorder its domains emit
-// through. Its [Runtime.Relay] publishes the outbox, and its
-// [Runtime.Consume] builds a consuming reactor that decodes each event into
-// the consumer's own type and binds its inbox claim. The failures both
+// through. Its [Runtime.Relay] publishes the outbox, its [Runtime.Consume]
+// builds a consuming reactor that decodes each event into the consumer's own
+// type and binds its inbox claim, and its [Runtime.Work] builds a reactor
+// that runs a work queue's jobs, decoded the same way. The failures they
 // survive reach the hook set as [Setup.OnFailure], each as a [Failure], and
 // are logged at warn without one. Under a [Setup.Gate], the relay holds a
-// quiesce gate for each outbox row and a consumer for each delivery, so an
-// operation that holds the gate exclusively runs with both paused.
-// [Config] is the service's messaging configuration block, beside its
-// provider's. The runtime registers nothing: the composition root makes the
-// broker and each reactor a node of its graph, and the coordinator infers
-// from their methods how to start, drain, and watch them.
+// quiesce gate for each outbox row and a consumer or worker for each
+// delivery, so an operation that holds the gate exclusively runs with them
+// all paused. [Config] is the service's messaging configuration block,
+// beside its provider's. The runtime registers nothing: the composition root
+// makes the broker and each reactor a node of its graph, and the coordinator
+// infers from their methods how to start, drain, and watch them.
 //
 // # Providers and engines
 //

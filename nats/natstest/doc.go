@@ -9,11 +9,15 @@
 //     broker's prefix, unique to the test on any server, and deletes the
 //     stream when the test ends; the test's event types are under the
 //     namespace
+//   - [ScratchQueue], which returns a stream name and a work queue's work
+//     and dead-letter subjects, unique to the test, and deletes the stream
+//     when the test ends
 //
-// [Open] serves the provider's own integration suite; [Scratch] also serves
-// a service's harness, which points a service process at a server of its
-// choosing. Open reads the environment, and Scratch takes the server.
-// Scratch creates nothing: the broker the test points at the stream
-// provisions it, and Scratch's cleanup, registered first, runs after that
-// broker's own. A stream nothing created is tolerated.
+// [Open] serves the provider's own integration suite; [Scratch] and
+// [ScratchQueue] also serve a service's harness, which points a service
+// process at a server of its choosing. Open reads the environment, and
+// Scratch and ScratchQueue take the server. Neither creates anything: the
+// broker or queue the test points at the stream provisions it, and the
+// cleanup, registered first, runs after that broker's or queue's own. A
+// stream nothing created is tolerated.
 package natstest

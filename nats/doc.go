@@ -1,4 +1,5 @@
-// Package nats is go-messaging's NATS JetStream broker provider.
+// Package nats is go-messaging's NATS JetStream broker and work-queue
+// provider.
 //
 // The package exports:
 //
@@ -12,6 +13,11 @@
 //   - [Config], the service's nats block, with [Config.Merge],
 //     [Config.Finalize], and [Config.Validate]; and [DefaultURL], the server
 //     Finalize fills in
+//   - [Queue], a [messaging.Queue] on a work-queue stream, built by
+//     [NewQueue], with [Queue.Start], [Queue.Ready], [Queue.Shutdown],
+//     [Queue.Enqueue], and [Queue.Subscribe]
+//   - [QueueConfig], the service's queue block, with [QueueConfig.Merge],
+//     [QueueConfig.Finalize], and [QueueConfig.Validate]
 //   - [ErrNotStarted], a call before Start, and [ErrStarted], a second Start
 //   - [AckMargin], how much longer a consumer waits for an outcome than the
 //     handler's deadline
@@ -63,6 +69,50 @@
 // when the connection closes or the consumer or its stream is deleted. A
 // message it cannot decode, or whose metadata does not parse, is terminated
 // and reported. A handler error never ends Receive.
+//
+// # Work queues
+//
+// A [Queue] is a lifecycle component like a [Broker], on a stream of its
+// own with work-queue retention: [NewQueue] checks its [QueueConfig] and
+// does no I/O, and [Queue.Start] connects. The owner, which
+// QueueConfig.Owner marks, creates the stream or updates it to its config,
+// on file storage, capturing the work subject, the dead-letter subject, and
+// every subject under the dead-letter subject; every other queue binds the
+// stream as it finds it, and fails to start when the stream is missing, is
+// not a work queue, or does not capture those subjects. [Queue.Enqueue]
+// stores an event on the work subject with its source and id as
+// Nats-Msg-Id, so a repeat within [messaging.DefaultDuplicates] is stored
+// once.
+//
+// The workers subscribed under one Name share one durable pull consumer on
+// their subject, which the source binds at its first Receive; each pulls one
+// job at a time. A work-queue stream refuses a second consumer whose subject
+// overlaps the first's, so one worker group takes each subject. While the
+// handler runs, the source extends the delivery four times per AckWait, and
+// when no extension is answered for AckWait it ends the handler's context,
+// which carries the delivery's end for [messaging.Runtime.Work].
+// [Queue.Subscribe] rejects a worker whose AckWait plus [AckMargin] is not
+// less than [messaging.DefaultDuplicates], since a dead letter's redelivery
+// after a lost acknowledgement must fall within the deduplication window to
+// be dropped; AckWait bounds a delivery between extensions, not a job's run
+// time, so a long job still runs. A nil
+// acknowledges the job, and an error naks it with the attempt's
+// [messaging.Worker.RetryDelay]. The handler's context carries the attempt,
+// the server's delivered count. The consumer sets no delivery limit: the
+// source enforces the worker's MaxDeliver, and dead-letters a delivery past
+// it without calling the handler. A permanent error, an error on the final
+// attempt, and a message that does not decode dead-letter the job too. A
+// dead letter is the stored message, unchanged, published on the worker's
+// DeadLetter with the dead-letter headers and a Nats-Msg-Id from that
+// subject and the event's source and id, so it is stored once if
+// dead-lettering repeats; only once the stream holds it is the job
+// acknowledged, and a failed publish naks the job instead, so it is
+// delivered again after the attempt's RetryDelay as its next attempt: a
+// delivery past the final attempt, or a message that does not decode,
+// dead-letters it again, and any other runs the handler again. A source
+// on a dead-letter subject puts each dead letter's [messaging.DeadLetter] on
+// the handler's context. A drained handler's nil settles its job, a
+// permanent error dead-letters it, and any other error naks it at once.
 //
 // [Broker.Conn] is the native handle, for uses beyond the standard tier such
 // as request and reply. It belongs in the composition root.
