@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -243,8 +244,8 @@ func TestQueueWorkerBindsConsumer(t *testing.T) {
 		if got.AckWait != want.AckWait+nats.AckMargin {
 			t.Errorf("%s: AckWait = %v, want %v", w.Name, got.AckWait, want.AckWait+nats.AckMargin)
 		}
-		if got.MaxDeliver != w.MaxDeliver+1 {
-			t.Errorf("%s: MaxDeliver = %d, want %d, one past the worker's", w.Name, got.MaxDeliver, w.MaxDeliver+1)
+		if got.MaxDeliver != -1 {
+			t.Errorf("%s: MaxDeliver = %d, want -1, unlimited", w.Name, got.MaxDeliver)
 		}
 	}
 }
@@ -396,6 +397,53 @@ func TestQueueDeadLetterStoredBeforeRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "the dead letter, and the job gone", holding(t, js, cfg.Stream, map[string]uint64{cfg.DeadLetter: 1, cfg.Subject: 0}))
+}
+
+func TestQueueDeadLetterPastLimitRetried(t *testing.T) {
+	q, url, cfg := ownerQueue(t)
+	js := jetStream(t, url)
+	full := streamInfo(t, js, cfg.Stream).Config
+	cut := full
+	cut.Subjects = []string{cfg.Subject}
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+	if _, err := js.UpdateStream(ctx, cut); err != nil {
+		t.Fatal(err)
+	}
+	w := messaging.Worker{Name: "past", MaxDeliver: 2, Backoff: []time.Duration{200 * time.Millisecond}, DeadLetter: cfg.DeadLetter}
+	var failed reports
+	src, err := q.Subscribe(w, failed.report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	receive(t, src, func(context.Context, event.Event) error {
+		calls.Add(1)
+		return errors.New("transient")
+	})
+	if err := q.Enqueue(t.Context(), event.Event{ID: "x", Source: "/test", Type: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "a delivery past the limit after one past it failed to dead-letter", func() bool {
+		n := 0
+		for _, err := range failed.seen() {
+			if strings.Contains(err.Error(), "dead-letter") {
+				n++
+			}
+		}
+		return n >= 3
+	})
+	if n := held(t, js, cfg.Stream, cfg.Subject); n != 1 {
+		t.Errorf("the work subject holds %d jobs while the dead letter cannot be stored, want 1", n)
+	}
+
+	if _, err := js.UpdateStream(ctx, full); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the dead letter, and the job gone", holding(t, js, cfg.Stream, map[string]uint64{cfg.DeadLetter: 1, cfg.Subject: 0}))
+	if n := calls.Load(); n != int32(w.MaxDeliver) {
+		t.Errorf("the handler ran %d times, want MaxDeliver, %d", n, w.MaxDeliver)
+	}
 }
 
 func TestQueueUndecodableDeadLetters(t *testing.T) {

@@ -189,7 +189,7 @@ func (q *Queue) Subscribe(w messaging.Worker, report messaging.Report) (reactor.
 		DeliverPolicy: jetstream.DeliverAllPolicy,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       w.AckWait + AckMargin,
-		MaxDeliver:    w.MaxDeliver + 1,
+		MaxDeliver:    -1,
 		FilterSubject: subject,
 	}
 	return &worker{q: q, w: w, name: w.Name, stream: q.cfg.Stream, cfg: cfg, report: report}, nil

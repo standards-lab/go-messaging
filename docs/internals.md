@@ -138,9 +138,11 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   has ended. An acknowledgement that arrives after the server's AckWait but before any member
   pulls again still removes the job, so a late outcome is lost only to a redelivery already
   taken.
-- **Outcomes.** The consumer's MaxDeliver is one past the worker's, so the delivery past the
-  final attempt reaches the worker, which dead-letters it with the no-error outcome without
-  running the handler. A failed attempt naks with the attempt's RetryDelay; JetStream's consumer
+- **Outcomes.** The consumer sets no delivery limit, MaxDeliver -1, and the worker enforces its
+  own: a delivery past the final attempt, as when the final attempt ended unsettled, reaches the
+  worker, which dead-letters it with the no-error outcome without running the handler. A server
+  limit would stop delivering the job once reached, so a dead letter that failed on the last
+  delivery it allowed could never be retried. A failed attempt naks with the attempt's RetryDelay; JetStream's consumer
   BackOff applies only to ack timeouts, so it is unset. A drained handler's error naks at once,
   unless it is permanent. A message whose metadata does not parse is terminated, since it has no
   attempt count to dead-letter with.
@@ -154,9 +156,10 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   event's enqueue id; an undecodable message's has `#` and its stream sequence in place of the
   enqueue id. An enqueue id starts with a digit, so a dead letter is never a duplicate of an
   enqueue, and a repeated dead-lettering, as when the acknowledgement after the publish is lost,
-  is dropped within the deduplication window. The delivery past the final attempt can still fail
-  its publish: the consumer then delivers the job no more, and it stays on the stream until
-  MaxAge discards it or an operator acts.
+  is dropped within the deduplication window. Since the consumer has no delivery limit, a
+  publish that fails on a delivery past the final attempt is retried on the next delivery too,
+  RetryDelay later, so the job always ends as a dead letter; until the publish succeeds, the job
+  stays on the work subject, and is redelivered without running the handler.
 
 ## outbox: the relay's transactions
 

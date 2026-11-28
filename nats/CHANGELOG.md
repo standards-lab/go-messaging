@@ -14,15 +14,18 @@ changelog covers this sub-module only; the base module keeps its own.
   or updates the stream on file storage over the work subject, the dead-letter subject, and every
   subject under it; a non-owner binds the stream as it finds it. `Enqueue` stores an event on the
   work subject with its source and id as `Nats-Msg-Id`. The workers under one name share one
-  durable pull consumer, whose MaxDeliver is one past the worker's; each holds one job at a time,
-  extends its delivery while the handler runs, ends the handler's context when no extension is
-  answered for AckWait, acknowledges a nil, and naks an error with the attempt's retry delay.
-  A permanent error, an error on the final attempt, the delivery past it, and a message that
-  does not decode dead-letter the job: the message, unchanged but for the dead-letter headers,
-  is published on the worker's dead-letter subject with a `Nats-Msg-Id` of its own, so it is
-  stored once, and the job is acknowledged only after the stream holds it. A worker on a
-  dead-letter subject puts each dead letter's `messaging.DeadLetter` on the handler's context.
-  The provider passes `messagingtest.RunQueue`.
+  durable pull consumer with no server delivery limit, and a work-queue stream takes one worker
+  group per subject. Each worker holds one job at a time, extends its delivery while the handler
+  runs, ends the handler's context when no extension is answered for AckWait, acknowledges a
+  nil, and naks an error with the attempt's retry delay. A permanent error, an error on the
+  final attempt, any delivery past it, which the worker dead-letters without running the
+  handler, and a message that does not decode dead-letter the job: the message, unchanged but
+  for the dead-letter headers, is published on the worker's dead-letter subject with a
+  `Nats-Msg-Id` of its own, so it is stored once, and the job is acknowledged only after the
+  stream holds it. A failed publish naks the job, and its next delivery dead-letters it again,
+  so the job always ends as a dead letter. A worker on a dead-letter subject puts each dead
+  letter's `messaging.DeadLetter` on the handler's context. The provider passes
+  `messagingtest.RunQueue`.
 - `natstest.ScratchQueue`, a stream and a work queue's subjects unique to the test.
 
 ### Changed
