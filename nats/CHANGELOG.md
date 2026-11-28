@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-27
+
 ### Added
 
 - `Queue`, with `NewQueue` and its `QueueConfig` block: a `messaging.Queue` on a stream with
@@ -35,8 +37,7 @@ changelog covers this sub-module only; the base module keeps its own.
 ### Changed
 
 - `ErrNotStarted` and `ErrStarted` also name a `Queue` that is not started, or started twice.
-- The `go-messaging` requirement is replaced by the working tree, for the work-queue contract,
-  until go-messaging v0.5.0 is released.
+- Requires go-messaging v0.5.0, for the work-queue contract.
 
 ## [v0.4.0] - 2026-11-27
 
@@ -121,7 +122,8 @@ changelog covers this sub-module only; the base module keeps its own.
   (`nats:2.15.1-alpine`, JetStream on tmpfs), through `mise run integration:nats`.
 - The module requires `go-messaging` v0.1.0, go-core v0.10.0, and nats.go v1.54.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/nats/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.4.0...nats/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.3.0...nats/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.2.0...nats/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/nats/v0.1.0...nats/v0.2.0

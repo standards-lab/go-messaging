@@ -7,6 +7,8 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-27
+
 ### Added
 
 - `Queue`, the work-queue contract, which a provider implements apart from `Broker`: `Enqueue`
@@ -244,7 +246,8 @@ v0.7.0, which make the same change to their own constructors and transactions.
 - The base module depends on the standard library, go-core, and sqlate and sqlate/query, which
   depguard enforces.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-messaging/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/v0.1.0...v0.2.0
