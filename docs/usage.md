@@ -313,7 +313,12 @@ below. `Worker.Validate` reports every way a worker is unusable, together: a `Na
 `messaging.CheckName`, a set `Subject` or a `DeadLetter` that fails `messaging.CheckType`, a
 `MaxDeliver` that is not positive, a negative `AckWait` or `Backoff` entry, and a `DeadLetter`
 that is missing or is the worker's own `Subject`. The queue's `Subscribe` validates the worker
-and fails on an unusable one, so `Runtime.Work` does too. `Worker.RetryDelay(n)` is how long a
+and fails on an unusable one, so `Runtime.Work` does too. The NATS queue's `Subscribe` also
+rejects an `AckWait` of `messaging.DefaultDuplicates` less `nats.AckMargin`, 1m59.75s, or more,
+and the error names that bound: a dead letter's repeat after a lost acknowledgement comes
+`AckWait` plus the margin later, and is dropped only within the deduplication window. `AckWait`
+is how long a delivery lasts between extensions, not how long the job may run, so a job that runs
+for hours keeps an `AckWait` well inside the bound. `Worker.RetryDelay(n)` is how long a
 job waits after failed attempt `n`: `Backoff[n-1]`, the last entry past the end, and 0, a
 redelivery at once, with no `Backoff`.
 
@@ -367,8 +372,10 @@ The handler's return is the job's outcome:
   extension, dead-letters the job on its next delivery, without calling the handler.
 
 A job leaves the queue only once its dead letter is stored. When the store fails, the job stays
-and its next delivery, after its attempt's `RetryDelay`, dead-letters it again without calling
-the handler, so a job past its final attempt always ends as a dead letter.
+and is delivered again, after its attempt's `RetryDelay`, as its next attempt: a delivery past
+the final attempt, or of a message that does not decode, dead-letters it again without calling
+the handler, and any other calls the handler again, as after a permanent error on an earlier
+attempt. So a job past its final attempt always ends as a dead letter.
 
 ### Dead letters
 

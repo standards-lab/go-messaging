@@ -22,8 +22,12 @@ changelog covers this sub-module only; the base module keeps its own.
   handler, and a message that does not decode dead-letter the job: the message, unchanged but
   for the dead-letter headers, is published on the worker's dead-letter subject with a
   `Nats-Msg-Id` of its own, so it is stored once, and the job is acknowledged only after the
-  stream holds it. A failed publish naks the job, and its next delivery dead-letters it again,
-  so the job always ends as a dead letter. A worker on a dead-letter subject puts each dead
+  stream holds it. A failed publish naks the job, and its next delivery is its next attempt:
+  past the final attempt it dead-letters again without the handler, and before it the handler
+  runs again, so the job always ends as a dead letter. `Subscribe` rejects a worker whose
+  AckWait plus `AckMargin` is not less than `messaging.DefaultDuplicates`, so a dead letter
+  repeated after a lost acknowledgement falls within the deduplication window; AckWait bounds a
+  delivery between extensions, not a job's run time. A worker on a dead-letter subject puts each dead
   letter's `messaging.DeadLetter` on the handler's context. The provider passes
   `messagingtest.RunQueue`.
 - `natstest.ScratchQueue`, a stream and a work queue's subjects unique to the test.

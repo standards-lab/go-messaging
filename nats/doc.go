@@ -90,7 +90,12 @@
 // overlaps the first's, so one worker group takes each subject. While the
 // handler runs, the source extends the delivery four times per AckWait, and
 // when no extension is answered for AckWait it ends the handler's context,
-// which carries the delivery's end for [messaging.Runtime.Work]. A nil
+// which carries the delivery's end for [messaging.Runtime.Work].
+// [Queue.Subscribe] rejects a worker whose AckWait plus [AckMargin] is not
+// less than [messaging.DefaultDuplicates], since a dead letter's redelivery
+// after a lost acknowledgement must fall within the deduplication window to
+// be dropped; AckWait bounds a delivery between extensions, not a job's run
+// time, so a long job still runs. A nil
 // acknowledges the job, and an error naks it with the attempt's
 // [messaging.Worker.RetryDelay]. The handler's context carries the attempt,
 // the server's delivered count. The consumer sets no delivery limit: the
@@ -101,8 +106,10 @@
 // DeadLetter with the dead-letter headers and a Nats-Msg-Id from that
 // subject and the event's source and id, so it is stored once if
 // dead-lettering repeats; only once the stream holds it is the job
-// acknowledged, and a failed publish naks the job instead, so its next
-// delivery, after the attempt's RetryDelay, dead-letters it again. A source
+// acknowledged, and a failed publish naks the job instead, so it is
+// delivered again after the attempt's RetryDelay as its next attempt: a
+// delivery past the final attempt, or a message that does not decode,
+// dead-letters it again, and any other runs the handler again. A source
 // on a dead-letter subject puts each dead letter's [messaging.DeadLetter] on
 // the handler's context. A drained handler's nil settles its job, a
 // permanent error dead-letters it, and any other error naks it at once.

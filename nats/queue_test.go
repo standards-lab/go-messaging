@@ -212,3 +212,33 @@ func TestQueueSubscribeChecksSubjects(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueSubscribeBoundsAckWait(t *testing.T) {
+	q := newQueue(t, closedURL(t))
+	limit := messaging.DefaultDuplicates - nats.AckMargin
+	for name, ackWait := range map[string]time.Duration{
+		"at the window":    limit,
+		"the whole window": messaging.DefaultDuplicates,
+		"an hour":          time.Hour,
+	} {
+		w := queueWorker
+		w.AckWait = ackWait
+		_, err := q.Subscribe(w, nil)
+		if err == nil || !strings.Contains(err.Error(), "set AckWait below "+limit.String()) {
+			t.Errorf("%s: Subscribe = %v, want an error naming AckWait's bound", name, err)
+		}
+	}
+	w := queueWorker
+	w.AckWait = limit - time.Millisecond
+	if _, err := q.Subscribe(w, nil); err != nil {
+		t.Errorf("Subscribe with AckWait %v = %v", w.AckWait, err)
+	}
+
+	w = messaging.Worker{Name: "w", MaxDeliver: 1, AckWait: time.Hour, DeadLetter: "other.dead"}
+	_, err := q.Subscribe(w, nil)
+	for _, want := range []string{`dead letter "other.dead"`, "set AckWait below"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Subscribe = %v, want an error naming %s", err, want)
+		}
+	}
+}

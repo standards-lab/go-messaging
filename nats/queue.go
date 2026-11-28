@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -165,7 +166,12 @@ func (q *Queue) Enqueue(ctx context.Context, e event.Event) error {
 }
 
 // Subscribe validates w, and that its Subject, when set, and its
-// DeadLetter are the queue's DeadLetter or under it, and returns a source
+// DeadLetter are the queue's DeadLetter or under it, and that its AckWait
+// plus [AckMargin] is less than the deduplication window,
+// [messaging.DefaultDuplicates], so a dead letter stored again after a lost
+// acknowledgement is dropped as a repeat. AckWait bounds a delivery only
+// between extensions, so the bound does not limit how long a job runs.
+// Subscribe reports each of these problems, and on none returns a source
 // that binds the group's durable consumer at its first Receive, as
 // [messaging.Queue] describes. The source passes report each error it
 // survives; a nil report discards them.
@@ -173,13 +179,20 @@ func (q *Queue) Subscribe(w messaging.Worker, report messaging.Report) (reactor.
 	if err := w.Validate(); err != nil {
 		return nil, err
 	}
+	w = w.Normalize()
+	var errs []error
 	if w.Subject != "" && !within(w.Subject, q.cfg.DeadLetter) {
-		return nil, fmt.Errorf("nats: subscribe %s: subject %q is not the queue's dead-letter subject %q or under it", w.Name, w.Subject, q.cfg.DeadLetter)
+		errs = append(errs, fmt.Errorf("subject %q is not the queue's dead-letter subject %q or under it", w.Subject, q.cfg.DeadLetter))
 	}
 	if !within(w.DeadLetter, q.cfg.DeadLetter) {
-		return nil, fmt.Errorf("nats: subscribe %s: dead letter %q is not the queue's dead-letter subject %q or under it", w.Name, w.DeadLetter, q.cfg.DeadLetter)
+		errs = append(errs, fmt.Errorf("dead letter %q is not the queue's dead-letter subject %q or under it", w.DeadLetter, q.cfg.DeadLetter))
 	}
-	w = w.Normalize()
+	if w.AckWait+AckMargin >= messaging.DefaultDuplicates {
+		errs = append(errs, fmt.Errorf("ack wait %v plus the margin %v is not within the deduplication window %v: set AckWait below %v", w.AckWait, AckMargin, messaging.DefaultDuplicates, messaging.DefaultDuplicates-AckMargin))
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("nats: subscribe %s: %w", w.Name, errors.Join(errs...))
+	}
 	subject := w.Subject
 	if subject == "" {
 		subject = q.cfg.Subject

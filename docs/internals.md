@@ -150,15 +150,23 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   data and headers, less the `Nats-` headers, with the dead-letter headers, on its dead-letter
   subject, and acknowledges the job only once the publish returns, so a job leaves the queue
   only after its dead letter is stored. A failed publish is reported and naks the job with the
-  attempt's RetryDelay, so the next delivery dead-letters it again. The dead letter's
+  attempt's RetryDelay, and the next delivery is handled as the next attempt: past the final
+  attempt, or undecodable, it dead-letters again without running the handler; otherwise, as
+  after a permanent error on an earlier attempt, it runs the handler again. The dead letter's
   `Nats-Msg-Id` is `d`, the dead-letter subject's length, `:`, the subject, and then the
   event's enqueue id; an undecodable message's has `#` and its stream sequence in place of the
   enqueue id. An enqueue id starts with a digit, so a dead letter is never a duplicate of an
   enqueue, and a repeated dead-lettering, as when the acknowledgement after the publish is lost,
-  is dropped within the deduplication window. Since the consumer has no delivery limit, a
-  publish that fails on a delivery past the final attempt is retried on the next delivery too,
-  RetryDelay later, so the job always ends as a dead letter; until the publish succeeds, the job
-  stays on the work subject, and is redelivered without running the handler.
+  is dropped within the deduplication window. That repeat comes once the server's AckWait, the
+  worker's AckWait plus AckMargin, has passed, so `Subscribe` rejects a worker whose AckWait plus
+  AckMargin is not less than the window the queue configures, `messaging.DefaultDuplicates`.
+  AckWait bounds a delivery between extensions, not the handler's run time, so the bound limits
+  no job's length. The bound is that window rather than a bound stream's own: a worker is
+  subscribed with no I/O, before its queue need have started, so the stream's window is not yet
+  known. Since the consumer has no delivery limit, a publish that fails on a delivery past the
+  final attempt is retried on the next delivery too, RetryDelay later, so the job always ends as
+  a dead letter; until the publish succeeds, the job stays on the work subject, and is
+  redelivered without running the handler.
 
 ## outbox: the relay's transactions
 
