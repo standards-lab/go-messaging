@@ -3,8 +3,8 @@ module github.com/standards-lab/go-messaging/postgres
 go 1.27
 
 require (
-	github.com/standards-lab/go-core v0.12.0
-	github.com/standards-lab/go-messaging v0.3.0
+	github.com/standards-lab/go-core v0.13.0
+	github.com/standards-lab/go-messaging v0.5.0
 	github.com/standards-lab/sqlate v0.8.0
 	github.com/standards-lab/sqlate/postgres v0.9.0
 )

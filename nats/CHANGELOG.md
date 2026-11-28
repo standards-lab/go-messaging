@@ -7,6 +7,13 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** The `go-core` requirement is v0.13.0, whose `EventKind.Raise` takes a trailing
+  `event.RaiseOptions`, and which adds `event.Options.Extensions` for a recorder's service-wide
+  extension attributes. A raise with no extension attributes passes `event.RaiseOptions{}`.
+  go-core's changelog migrates each.
+
 ## [v0.5.0] - 2026-11-27
 
 ### Added

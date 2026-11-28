@@ -38,7 +38,7 @@ exactly when the state it reports commits:
 ```go
 _, err := sqlate.Transact(ctx, db, rt.Recorder.Emit(ctx, func(tx *sqlate.Tx, q *event.Queue) (struct{}, error) {
 	// ... the command's writes on tx ...
-	InvoiceIssued.Raise(q, invoiceID, InvoiceIssuedData{Amount: amount})
+	InvoiceIssued.Raise(q, invoiceID, InvoiceIssuedData{Amount: amount}, event.RaiseOptions{})
 	return struct{}{}, nil
 }), nil)
 ```
