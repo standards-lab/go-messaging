@@ -9,7 +9,8 @@
 //     also a [messaging.Journal], each case as a subtest
 //   - [RunQueue], which runs the work queue's cases against queues from a
 //     provider's constructor, each case as a subtest, and [QueueHarness],
-//     the queue under test with the time it runs on
+//     the queue under test with the time it runs on, the dead-letter
+//     subject the cases use, and the runtime their reactors are built from
 //
 // A provider's test calls [Run] with a constructor for a fresh broker; each
 // case runs its sources through a [reactor.Reactor], as a composition root
@@ -51,7 +52,11 @@
 // handler. A dead-letter worker receives each dead letter with its
 // [messaging.DeadLetter] and acknowledges it off. A drained handler's
 // context ends; its nil holds and its error leaves the job for
-// redelivery. Time passes through [QueueHarness.Advance], and a case that
+// redelivery. One case runs its worker through a reactor that
+// [messaging.Runtime.Work] builds, and proves that the reactor's drain ends
+// the handler's context, so the reactor unwinds without cancelling it, and
+// leaves the job for redelivery. Time passes through
+// [QueueHarness.Advance], and a case that
 // proves an absence enqueues a later event and waits for it, so the queue
 // has acted on whatever was due before it.
 package messagingtest

@@ -37,7 +37,9 @@
 // delivery is extended for as long as its handler runs, the in-process
 // form of an extension that always succeeds. A handler whose source drains
 // settles its job by a nil or a permanent error; any other error leaves
-// the job for redelivery at once, as an attempt with no outcome. Enqueue
+// the job for redelivery at once, as an attempt with no outcome. Each
+// handler's context carries its delivery's end, which
+// [messaging.DeliveryEnd] reads. Enqueue
 // and each dead-lettering store a source and id once on a subject within
 // [messaging.DefaultDuplicates], so a dead letter never collides with its
 // event's enqueue. Like the broker, the queue encodes each job and each

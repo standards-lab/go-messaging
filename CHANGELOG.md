@@ -13,7 +13,16 @@ only; the `postgres` and `nats` sub-modules keep their own.
   apart from its `Broker`.
 - `messagingtest.RunQueue`, the work queue's conformance suite, with `messagingtest.QueueHarness`,
   the queue under test and the time it runs on, which a provider on an injected clock advances
-  and a real-time provider waits out.
+  and a real-time provider waits out, the dead-letter subject the cases use, and the runtime
+  their reactors are built from. One case runs its worker through a `Runtime.Work` reactor and
+  proves that the drain ends the handler's context.
+- `Runtime.Work`, the work queue's counterpart of `Runtime.Consume`: a reactor that runs a worker
+  group's jobs, decoding each job's data into the worker's own type, logging each delivery's
+  outcome, holding the `Setup.Gate`, and reporting source failures to the hook. It ends the
+  handler's context when the delivery ends or the reactor drains, which a reactor's detached
+  handler context would otherwise hide.
+- `WithDeliveryEnd`, which a queue provider calls to put the end of a delivery on its handler's
+  context, and `DeliveryEnd`, which reads it. The memory queue puts it on each delivery.
 
 ## [v0.4.0] - 2026-11-27
 

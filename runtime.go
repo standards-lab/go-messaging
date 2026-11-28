@@ -85,17 +85,19 @@ type Setup struct {
 	// [FailureRelay], leaving the relay ready, since it is not the
 	// database's.
 	//
-	// Each delivery a [Runtime.Consume] reactor handles holds the gate for
-	// the handler's whole call, and the handler is not called until it
-	// does. A wait that the drain ends hands the handler nothing and leaves
-	// the event unacknowledged, for the broker to redeliver. The wait is
-	// bounded by the delivery's AckWait like the handler is: a delivery
-	// that waits on the gate past AckWait is redelivered, and counts
-	// against MaxDeliver, so an event whose last delivery waits that long is
-	// given up unreported. Any other failure of the gate is the delivery's
-	// outcome, as a transient error of the handler's would be: the event is
-	// redelivered, and on its last delivery reported as a
-	// [FailureExhausted].
+	// Each delivery a [Runtime.Consume] or [Runtime.Work] reactor handles
+	// holds the gate for the handler's whole call, and the handler is not
+	// called until it does. A wait that the drain ends hands the handler
+	// nothing and leaves the event unacknowledged, for the broker or queue
+	// to redeliver. A consumer's wait is bounded by the delivery's AckWait
+	// like its handler is: a delivery that waits on the gate past AckWait
+	// is redelivered, and counts against MaxDeliver, so an event whose last
+	// delivery waits that long is given up unreported. A worker's delivery
+	// is extended while it waits, as while its handler runs. Any other
+	// failure of the gate is the delivery's outcome, as a transient error
+	// of the handler's would be: the event is redelivered, and on its last
+	// delivery a consumer's is reported as a [FailureExhausted] and a
+	// worker's dead-lettered.
 	Gate Gate
 }
 
@@ -255,6 +257,85 @@ func (r *Runtime) Consume[T any](sub Subscription, fn func(ctx context.Context, 
 		return err
 	}
 	return reactor.New(src, handle, reactor.Options{CancelAfter: reactor.CancelWithin(r.shutdown)}), nil
+}
+
+// Work returns the reactor that runs the jobs of q's worker group w, with
+// the bound [reactor.CancelWithin] gives the drain timeout: the work-queue
+// counterpart of [Runtime.Consume]. The reactor decodes each job's data into
+// T, the worker's own type for the payload, and hands it to fn. Data that
+// does not decode is refused with [event.Permanent], because no redelivery
+// can fix it, so the queue dead-letters the job.
+//
+// A reactor detaches its handler from the source's cancellation, so the
+// reactor ends fn's context itself: when the delivery ends, as
+// [DeliveryEnd] reads it from the context the queue's source gives, because
+// the source lost its extension or drains, and when the reactor drains, as
+// [reactor.Draining] reads it.
+//
+// The reactor logs each delivery with the worker, the event's type, id, and
+// subject, its attempt, and its outcome: "job worked" at info when handled,
+// or retried, with the error, when the queue will redeliver it. A permanent
+// refusal is "job refused" at warn with the error, and an error on the
+// final attempt is "job exhausted" at warn with the error: the queue
+// dead-letters both. The reactor reports to the hook each error the source
+// survives, as a [FailureSource] naming w.Name.
+//
+// Under a [Setup.Gate], each delivery holds the gate shared for fn's whole
+// call, and fn is not called until it does. A wait that the drain or the
+// delivery's end ends hands fn nothing, logs and reports nothing, and leaves
+// the job to be redelivered.
+func (r *Runtime) Work[T any](q Queue, w Worker, fn func(ctx context.Context, data T) error) (*reactor.Reactor[event.Event], error) {
+	report := func(ctx context.Context, err error) {
+		r.hook(ctx, Failure{Kind: FailureSource, Consumer: w.Name, Err: err})
+	}
+	src, err := q.Subscribe(w, report)
+	if err != nil {
+		return nil, err
+	}
+	handle := func(ctx context.Context, e event.Event) error {
+		ctx, cancel := endWithDelivery(ctx)
+		defer cancel()
+		release, ended, err := r.share(ctx)
+		if ended {
+			return err
+		}
+		if err == nil {
+			defer release()
+			var data T
+			if derr := json.Unmarshal(e.Data, &data); derr != nil {
+				err = event.Permanent(fmt.Errorf("decode: %w", derr))
+			} else {
+				err = fn(ctx, data)
+			}
+		}
+		attrs := []any{"worker", w.Name, "type", e.Type, "event", e.ID, "subject", e.Subject, "attempt", Attempt(ctx)}
+		switch {
+		case event.IsPermanent(err):
+			r.logger.WarnContext(ctx, "job refused", append(attrs, "outcome", "refused", "error", err)...)
+		case err != nil && w.Final(ctx):
+			r.logger.WarnContext(ctx, "job exhausted", append(attrs, "outcome", "exhausted", "error", err)...)
+		case err != nil:
+			r.logger.InfoContext(ctx, "job worked", append(attrs, "outcome", "retried", "error", err)...)
+		default:
+			r.logger.InfoContext(ctx, "job worked", append(attrs, "outcome", "handled")...)
+		}
+		return err
+	}
+	return reactor.New(src, handle, reactor.Options{CancelAfter: reactor.CancelWithin(r.shutdown)}), nil
+}
+
+func endWithDelivery(ctx context.Context) (context.Context, context.CancelFunc) {
+	hctx, cancel := context.WithCancel(ctx)
+	end, drain := DeliveryEnd(ctx), reactor.Draining(ctx)
+	go func() {
+		select {
+		case <-end:
+		case <-drain:
+		case <-hctx.Done():
+		}
+		cancel()
+	}()
+	return hctx, cancel
 }
 
 func (r *Runtime) share(ctx context.Context) (release func(), ended bool, err error) {

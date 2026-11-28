@@ -27,6 +27,17 @@ type QueueHarness struct {
 	// Advance lets d of the queue's time pass: a provider on an injected
 	// clock moves the clock, and a real-time provider waits d.
 	Advance func(d time.Duration)
+	// DeadLetter is a dead-letter subject the queue accepts, with the
+	// subject one token below it, DeadLetter+".dead", for its own dead
+	// letters.
+	DeadLetter string
+	// Runtime is a runtime whose [messaging.Runtime.Work] builds the
+	// reactor cases' workers. Its drain timeout must be long enough that a
+	// handler ending at the drain unwinds within half of it.
+	Runtime *messaging.Runtime
+	// SkipDeadLetter skips the cases that dead-letter, for a provider that
+	// does not dead-letter yet.
+	SkipDeadLetter bool
 }
 
 // RunQueue runs the work queue's conformance cases, each as a subtest on a
@@ -35,35 +46,41 @@ func RunQueue(t *testing.T, newQueue func(t *testing.T) QueueHarness) {
 	cases := []struct {
 		name string
 		fn   func(*testing.T, QueueHarness)
+		dead bool
 	}{
-		{"EnqueueHolds", testEnqueueHolds},
-		{"EnqueueRejectsInvalid", testEnqueueRejectsInvalid},
-		{"EnqueueDeduplicates", testEnqueueDeduplicates},
-		{"WorkersShareQueue", testWorkersShareQueue},
-		{"ExtensionKeepsClaim", testExtensionKeepsClaim},
-		{"AckRemoves", testAckRemoves},
-		{"ErrorBacksOff", testErrorBacksOff},
-		{"PermanentDeadLetters", testPermanentDeadLetters},
-		{"FinalAttemptDeadLetters", testFinalAttemptDeadLetters},
-		{"UnsettledFinalDeadLetters", testUnsettledFinalDeadLetters},
-		{"DeadLetterWorkerAcks", testDeadLetterWorkerAcks},
-		{"SubscribeRejectsInvalidWorker", testSubscribeRejectsInvalidWorker},
-		{"DrainKeepsNil", testDrainKeepsNil},
-		{"DrainRedeliversError", testDrainRedeliversError},
+		{"EnqueueHolds", testEnqueueHolds, false},
+		{"EnqueueRejectsInvalid", testEnqueueRejectsInvalid, false},
+		{"EnqueueDeduplicates", testEnqueueDeduplicates, false},
+		{"WorkersShareQueue", testWorkersShareQueue, false},
+		{"ExtensionKeepsClaim", testExtensionKeepsClaim, false},
+		{"AckRemoves", testAckRemoves, false},
+		{"ErrorBacksOff", testErrorBacksOff, false},
+		{"PermanentDeadLetters", testPermanentDeadLetters, true},
+		{"FinalAttemptDeadLetters", testFinalAttemptDeadLetters, true},
+		{"UnsettledFinalDeadLetters", testUnsettledFinalDeadLetters, true},
+		{"DeadLetterWorkerAcks", testDeadLetterWorkerAcks, true},
+		{"SubscribeRejectsInvalidWorker", testSubscribeRejectsInvalidWorker, false},
+		{"DrainKeepsNil", testDrainKeepsNil, false},
+		{"DrainRedeliversError", testDrainRedeliversError, false},
+		{"ReactorDrainEndsHandler", testReactorDrainEndsHandler, false},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) { c.fn(t, newQueue(t)) })
+		t.Run(c.name, func(t *testing.T) {
+			h := newQueue(t)
+			if c.dead && h.SkipDeadLetter {
+				t.Skip("the provider does not dead-letter yet")
+			}
+			c.fn(t, h)
+		})
 	}
 }
 
-const deadSubject = "jobs.dead"
-
-func jobWorker(name string, maxDeliver int) messaging.Worker {
-	return messaging.Worker{Name: name, MaxDeliver: maxDeliver, DeadLetter: deadSubject}
+func jobWorker(h QueueHarness, name string, maxDeliver int) messaging.Worker {
+	return messaging.Worker{Name: name, MaxDeliver: maxDeliver, DeadLetter: h.DeadLetter}
 }
 
-func deadWorker(name string) messaging.Worker {
-	return messaging.Worker{Name: name, Subject: deadSubject, MaxDeliver: 1, DeadLetter: deadSubject + ".dead"}
+func deadWorker(h QueueHarness, name string) messaging.Worker {
+	return messaging.Worker{Name: name, Subject: h.DeadLetter, MaxDeliver: 1, DeadLetter: h.DeadLetter + ".dead"}
 }
 
 func enqueue(t *testing.T, q messaging.Queue, es ...event.Event) {
@@ -193,7 +210,7 @@ func recvCtx(t *testing.T, ch <-chan context.Context, what string) context.Conte
 func testEnqueueHolds(t *testing.T, h QueueHarness) {
 	enqueue(t, h.Queue, ev("held", "t"))
 	var c calls
-	w := jobWorker("holds", 3)
+	w := jobWorker(h, "holds", 3)
 	work(t, h.Queue, w, c.handler(w, nil))
 	eventually(t, c.has("held"), "the event enqueued before any worker")
 }
@@ -215,7 +232,7 @@ func testEnqueueDeduplicates(t *testing.T, h QueueHarness) {
 	elsewhere.Source, elsewhere.Data = "/elsewhere", []byte("elsewhere")
 	enqueue(t, h.Queue, first, repeat, elsewhere, ev("end", "t"))
 	var c calls
-	w := jobWorker("dedup", 3)
+	w := jobWorker(h, "dedup", 3)
 	work(t, h.Queue, w, c.handler(w, nil))
 	eventually(t, c.has("end"), "the event after the repeat")
 	var got []string
@@ -229,7 +246,7 @@ func testEnqueueDeduplicates(t *testing.T, h QueueHarness) {
 
 func testWorkersShareQueue(t *testing.T, h QueueHarness) {
 	const n = 6
-	w := jobWorker("share", 3)
+	w := jobWorker(h, "share", 3)
 	type start struct{ who, id string }
 	starts := make(chan start, n)
 	release := make(chan struct{})
@@ -293,7 +310,7 @@ func testWorkersShareQueue(t *testing.T, h QueueHarness) {
 }
 
 func testExtensionKeepsClaim(t *testing.T, h QueueHarness) {
-	w := jobWorker("extend", 3)
+	w := jobWorker(h, "extend", 3)
 	w.AckWait = 2 * h.Unit
 	var c calls
 	started := make(chan context.Context, 1)
@@ -321,7 +338,7 @@ func testExtensionKeepsClaim(t *testing.T, h QueueHarness) {
 }
 
 func testAckRemoves(t *testing.T, h QueueHarness) {
-	w := jobWorker("ack", 3)
+	w := jobWorker(h, "ack", 3)
 	w.AckWait = 2 * h.Unit
 	var c calls
 	work(t, h.Queue, w, c.handler(w, nil))
@@ -336,7 +353,7 @@ func testAckRemoves(t *testing.T, h QueueHarness) {
 
 func testErrorBacksOff(t *testing.T, h QueueHarness) {
 	u := h.Unit
-	w := jobWorker("backoff", 3)
+	w := jobWorker(h, "backoff", 3)
 	w.AckWait = 40 * u
 	w.Backoff = []time.Duration{4 * u, 8 * u}
 	var c calls
@@ -387,11 +404,11 @@ func testPermanentDeadLetters(t *testing.T, h QueueHarness) {
 		Data:            []byte(`{"id":42}`),
 		Extensions:      map[string]string{"traceparent": "00-abc-def-01"},
 	}
-	w := jobWorker("perm", 3)
+	w := jobWorker(h, "perm", 3)
 	var jobs, dead calls
 	perm := fmt.Errorf("handle: %w", event.Permanent(errors.New("malformed")))
 	work(t, h.Queue, w, jobs.handler(w, failing(want.ID, perm)))
-	dw := deadWorker("perm-dead")
+	dw := deadWorker(h, "perm-dead")
 	work(t, h.Queue, dw, dead.handler(dw, nil))
 	enqueue(t, h.Queue, want)
 	eventually(t, dead.has(want.ID), "the dead letter")
@@ -411,10 +428,10 @@ func testPermanentDeadLetters(t *testing.T, h QueueHarness) {
 
 func testFinalAttemptDeadLetters(t *testing.T, h QueueHarness) {
 	const maxDeliver = 3
-	w := jobWorker("final", maxDeliver)
+	w := jobWorker(h, "final", maxDeliver)
 	var jobs, dead calls
 	work(t, h.Queue, w, jobs.handler(w, failing("x", errors.New("boom"))))
-	dw := deadWorker("final-dead")
+	dw := deadWorker(h, "final-dead")
 	work(t, h.Queue, dw, dead.handler(dw, nil))
 	enqueue(t, h.Queue, ev("x", "t"))
 	eventually(t, dead.has("x"), "the dead letter")
@@ -442,7 +459,7 @@ func testFinalAttemptDeadLetters(t *testing.T, h QueueHarness) {
 }
 
 func testUnsettledFinalDeadLetters(t *testing.T, h QueueHarness) {
-	w := jobWorker("unsettled", 1)
+	w := jobWorker(h, "unsettled", 1)
 	w.AckWait = 40 * h.Unit
 	started := make(chan context.Context, 1)
 	first := work(t, h.Queue, w, func(ctx context.Context, _ event.Event) error {
@@ -455,7 +472,7 @@ func testUnsettledFinalDeadLetters(t *testing.T, h QueueHarness) {
 	stopWorker(t, first)
 
 	var jobs, dead calls
-	dw := deadWorker("unsettled-dead")
+	dw := deadWorker(h, "unsettled-dead")
 	work(t, h.Queue, dw, dead.handler(dw, nil))
 	work(t, h.Queue, w, jobs.handler(w, func(event.Event) error { return errors.New("ran") }))
 	eventually(t, dead.has("x"), "the dead letter")
@@ -469,10 +486,10 @@ func testUnsettledFinalDeadLetters(t *testing.T, h QueueHarness) {
 }
 
 func testDeadLetterWorkerAcks(t *testing.T, h QueueHarness) {
-	w := jobWorker("acked-off", 1)
+	w := jobWorker(h, "acked-off", 1)
 	var jobs, first, second calls
 	work(t, h.Queue, w, jobs.handler(w, func(event.Event) error { return errors.New("always") }))
-	dw := deadWorker("acked-off-dead")
+	dw := deadWorker(h, "acked-off-dead")
 	d1 := work(t, h.Queue, dw, first.handler(dw, nil))
 	enqueue(t, h.Queue, ev("x", "t"))
 	eventually(t, first.has("x"), "the dead letter")
@@ -502,7 +519,7 @@ func testSubscribeRejectsInvalidWorker(t *testing.T, h QueueHarness) {
 }
 
 func testDrainKeepsNil(t *testing.T, h QueueHarness) {
-	w := jobWorker("drain-nil", 3)
+	w := jobWorker(h, "drain-nil", 3)
 	w.AckWait = 2 * h.Unit
 	started := make(chan context.Context, 1)
 	first := work(t, h.Queue, w, func(ctx context.Context, _ event.Event) error {
@@ -524,7 +541,7 @@ func testDrainKeepsNil(t *testing.T, h QueueHarness) {
 }
 
 func testDrainRedeliversError(t *testing.T, h QueueHarness) {
-	w := jobWorker("drain-error", 3)
+	w := jobWorker(h, "drain-error", 3)
 	w.AckWait = 40 * h.Unit
 	started := make(chan context.Context, 1)
 	first := work(t, h.Queue, w, func(ctx context.Context, _ event.Event) error {
@@ -541,5 +558,51 @@ func testDrainRedeliversError(t *testing.T, h QueueHarness) {
 	eventually(t, c.has("x"), "the drained job's redelivery")
 	if got := c.of("x")[0].attempt; got != 2 {
 		t.Errorf("redelivered as attempt %d, want 2", got)
+	}
+}
+
+func testReactorDrainEndsHandler(t *testing.T, h QueueHarness) {
+	w := jobWorker(h, "reactor-drain", 3)
+	w.AckWait = 40 * h.Unit
+	type job struct{ N int }
+	started := make(chan context.Context, 1)
+	got := make(chan job, 1)
+	r, err := h.Runtime.Work(h.Queue, w, func(ctx context.Context, data job) error {
+		got <- data
+		started <- ctx
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	stopped := false
+	t.Cleanup(func() {
+		if !stopped {
+			_ = r.Shutdown(context.Background())
+		}
+	})
+	e := ev("x", "t")
+	e.Data = []byte(`{"N":7}`)
+	enqueue(t, h.Queue, e)
+	recvCtx(t, started, "the handler")
+	if data := <-got; data.N != 7 {
+		t.Errorf("the handler was given %+v, want the job's data decoded", data)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), failsafe)
+	defer cancel()
+	stopped = true
+	if err := r.Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown: %v: the handler's context did not end with the drain", err)
+	}
+
+	var c calls
+	work(t, h.Queue, w, c.handler(w, nil))
+	eventually(t, c.has("x"), "the drained job's redelivery")
+	if got := c.of("x")[0].attempt; got < 2 {
+		t.Errorf("redelivered as attempt %d, want a redelivery", got)
 	}
 }

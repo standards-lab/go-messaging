@@ -262,3 +262,23 @@ func DeadLetterOf(ctx context.Context) (DeadLetter, bool) {
 	d, ok := ctx.Value(deadLetterKey{}).(DeadLetter)
 	return d, ok
 }
+
+type deliveryEndKey struct{}
+
+// WithDeliveryEnd returns ctx carrying end, a channel closed when the
+// delivery its handler is given ends: the source lost its extension, or
+// drains. A provider calls it on each delivery's handler context, with that
+// context's Done, so the end survives a reactor, which detaches each handler
+// from its source's cancellation; [Runtime.Work] ends the handler's context
+// from it.
+func WithDeliveryEnd(ctx context.Context, end <-chan struct{}) context.Context {
+	return context.WithValue(ctx, deliveryEndKey{}, end)
+}
+
+// DeliveryEnd returns the channel closed when the delivery whose handler
+// context is ctx ends, and nil, which never closes, for a context no
+// provider gave one.
+func DeliveryEnd(ctx context.Context) <-chan struct{} {
+	end, _ := ctx.Value(deliveryEndKey{}).(<-chan struct{})
+	return end
+}

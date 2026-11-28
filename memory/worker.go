@@ -58,7 +58,7 @@ func (m *member) handle(ctx, hctx context.Context, j *job, c *claim, attempt int
 		m.settle(j, c, event.Permanent(err), false)
 		return
 	}
-	hctx = messaging.WithAttempt(hctx, attempt)
+	hctx = messaging.WithDeliveryEnd(messaging.WithAttempt(hctx, attempt), hctx.Done())
 	if m.w.Subject != "" {
 		if d, err := messaging.ReadDeadLetter(j.header); err == nil {
 			hctx = messaging.WithDeadLetter(hctx, d)

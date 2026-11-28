@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -598,4 +599,143 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestWork(t *testing.T) {
+	q := memory.NewQueue()
+	var log syncBuffer
+	var f failures
+	s := setup(t, memory.New(), slog.New(slog.NewTextHandler(&log, nil)))
+	s.OnFailure = f.hook
+	rt := build(t, s)
+	w := messaging.Worker{Name: "worker", MaxDeliver: 2, DeadLetter: "jobs.dead"}
+	handled := make(chan int, 4)
+	var failed sync.Once
+	r, err := rt.Work(q, w, func(_ context.Context, d payload) error {
+		switch d.N {
+		case 9:
+			return event.Permanent(errors.New("nine is refused"))
+		case 3:
+			return errors.New("three always fails")
+		case 5:
+			retry := false
+			failed.Do(func() { retry = true })
+			if retry {
+				return errors.New("five fails once")
+			}
+		}
+		handled <- d.N
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(t, r)
+
+	var dead []string
+	var deadMu sync.Mutex
+	dr, err := rt.Work(q, messaging.Worker{Name: "dead", Subject: "jobs.dead", MaxDeliver: 1, DeadLetter: "jobs.dead.dead"}, func(ctx context.Context, d payload) error {
+		deadMu.Lock()
+		defer deadMu.Unlock()
+		dead = append(dead, strconv.Itoa(d.N))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(t, dr)
+
+	for _, e := range []event.Event{
+		{ID: "bad", Source: "/test", Type: "t", DataContentType: "application/json", Data: []byte(`{"n":0`)},
+		{ID: "refused", Source: "/test", Type: "t", DataContentType: "application/json", Data: []byte(`{"n":9}`)},
+		{ID: "exhausted", Source: "/test", Type: "t", DataContentType: "application/json", Data: []byte(`{"n":3}`)},
+		{ID: "flaky", Source: "/test", Type: "t", DataContentType: "application/json", Data: []byte(`{"n":5}`)},
+		{ID: "good", Source: "/test", Type: "t", Subject: "s1", DataContentType: "application/json", Data: []byte(`{"n":7}`)},
+	} {
+		if err := q.Enqueue(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[int]bool{}
+	for len(got) < 2 {
+		select {
+		case n := <-handled:
+			if got[n] || n != 5 && n != 7 {
+				t.Fatalf("worker handled n=%d, want n=5 and n=7 once each", n)
+			}
+			got[n] = true
+		case <-time.After(failsafe):
+			t.Fatal("timed out waiting for the good jobs")
+		}
+	}
+	waitFor(t, "the dead letters whose data decodes", func() bool {
+		deadMu.Lock()
+		defer deadMu.Unlock()
+		return len(dead) == 2
+	})
+
+	lines := strings.Split(strings.TrimSpace(log.String()), "\n")
+	outcomes := func(id string) []string {
+		var out []string
+		for _, l := range lines {
+			if strings.Contains(l, "worker=worker ") && strings.Contains(l, "event="+id+" ") {
+				_, o, _ := strings.Cut(l, "outcome=")
+				o, _, _ = strings.Cut(o, " ")
+				out = append(out, o)
+			}
+		}
+		return out
+	}
+	for id, want := range map[string][]string{
+		"bad": {"refused"}, "refused": {"refused"}, "exhausted": {"retried", "exhausted"}, "flaky": {"retried", "handled"}, "good": {"handled"},
+	} {
+		if got := outcomes(id); !slices.Equal(got, want) {
+			t.Errorf("%s's deliveries were logged as %v, want %v:\n%s", id, got, want, log.String())
+		}
+	}
+	for _, want := range []string{
+		`level=WARN msg="job refused" worker=worker type=t event=refused subject="" attempt=1 outcome=refused error="permanent: nine is refused"`,
+		`level=WARN msg="job exhausted" worker=worker type=t event=exhausted subject="" attempt=2 outcome=exhausted error="three always fails"`,
+		`level=INFO msg="job worked" worker=worker type=t event=flaky subject="" attempt=1 outcome=retried error="five fails once"`,
+		`level=INFO msg="job worked" worker=worker type=t event=good subject=s1 attempt=1 outcome=handled`,
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the log lacks %s:\n%s", want, log.String())
+		}
+	}
+	if got := f.all(); len(got) != 0 {
+		t.Errorf("hook got %+v, want nothing", got)
+	}
+
+	if _, err := rt.Work(q, messaging.Worker{Name: "a.b"}, func(context.Context, payload) error { return nil }); err == nil {
+		t.Error("Work accepted an invalid worker")
+	}
+}
+
+func TestWorkGateWaitsForTheExclusiveHolder(t *testing.T) {
+	var g reactor.Gate
+	release := hold(t, &g)
+	q := memory.NewQueue()
+	var log syncBuffer
+	s := setup(t, memory.New(), slog.New(slog.NewTextHandler(&log, nil)))
+	s.Gate = &g
+	attempts := make(chan int, 4)
+	r, err := build(t, s).Work(q, messaging.Worker{Name: "worker", MaxDeliver: 1, DeadLetter: "jobs.dead"}, func(ctx context.Context, _ payload) error {
+		attempts <- messaging.Attempt(ctx)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(t, r)
+	if err := q.Enqueue(t.Context(), event.Event{ID: "x", Source: "/test", Type: "t", Data: []byte("{}")}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case a := <-attempts:
+		t.Fatalf("handler called on attempt %d while the gate was held exclusively", a)
+	case <-time.After(settleTime):
+	}
+	release()
+	awaitAttempts(t, attempts, 1)
 }

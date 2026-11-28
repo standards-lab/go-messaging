@@ -3,21 +3,63 @@ package memory_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/standards-lab/go-core/event"
 	"github.com/standards-lab/go-messaging"
+	"github.com/standards-lab/go-messaging/inbox"
 	"github.com/standards-lab/go-messaging/memory"
 	"github.com/standards-lab/go-messaging/messagingtest"
+	"github.com/standards-lab/go-messaging/outbox"
+	"github.com/standards-lab/sqlate/query"
+	"github.com/standards-lab/sqlate/sqltest"
 )
 
 func TestQueueConformance(t *testing.T) {
-	messagingtest.RunQueue(t, func(*testing.T) messagingtest.QueueHarness {
+	messagingtest.RunQueue(t, func(t *testing.T) messagingtest.QueueHarness {
 		q, c := memory.NewQueueOnClock()
-		return messagingtest.QueueHarness{Queue: q, Unit: time.Second, Advance: c.Advance}
+		return messagingtest.QueueHarness{Queue: q, Unit: time.Second, Advance: c.Advance, DeadLetter: "jobs.dead", Runtime: runtime(t)}
 	})
+}
+
+func runtime(t *testing.T) *messaging.Runtime {
+	t.Helper()
+	fsys := fstest.MapFS{}
+	for name, text := range map[string]string{
+		"emit":           "INSERT INTO o (s, id, h, d) VALUES ({{source}}, {{id}}, {{header}}, {{data}})",
+		"claim_row":      "SELECT seq, header, data FROM o",
+		"mark_published": "UPDATE o SET p = 1 WHERE seq = {{seq}}",
+		"quarantine":     "UPDATE o SET q = now(), r = {{reason}} WHERE seq = {{seq}}",
+		"claim":          "INSERT INTO i (c, s, id) VALUES ({{consumer}}, {{source}}, {{id}})",
+	} {
+		fsys["s/"+name+".sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n" + text)}
+	}
+	s := query.MustCatalog(query.Patterns()).MustCompile(fsys, "s", sqltest.Dialect{})
+	cfg := messaging.Config{Source: "/test"}
+	if err := cfg.Finalize(""); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := messaging.Setup{
+		Config: cfg,
+		Broker: memory.New(),
+		Outbox: outbox.Engine{
+			Emit:          s.Statement("emit"),
+			ClaimRow:      s.Statement("claim_row"),
+			MarkPublished: s.Statement("mark_published"),
+			Quarantine:    s.Statement("quarantine"),
+		},
+		Inbox:    inbox.Engine{Claim: s.Statement("claim")},
+		Shutdown: 4 * time.Second,
+		Logger:   slog.New(slog.DiscardHandler),
+	}.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt
 }
 
 const failsafe = 5 * time.Second
@@ -181,5 +223,48 @@ func TestQueueOnWallClock(t *testing.T) {
 		}
 	case <-time.After(failsafe):
 		t.Fatal("timed out waiting for the job")
+	}
+}
+
+func TestWorkLostExtensionEndsHandler(t *testing.T) {
+	q, c := memory.NewQueueOnClock()
+	started := make(chan context.Context, 1)
+	r, err := runtime(t).Work(q, jobs, func(ctx context.Context, _ struct{}) error {
+		started <- ctx
+		<-ctx.Done()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), failsafe)
+		defer cancel()
+		if err := r.Shutdown(ctx); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	})
+	if err := q.Enqueue(context.Background(), event.Event{ID: "x", Source: "/t", Type: "t", Data: []byte("{}")}); err != nil {
+		t.Fatal(err)
+	}
+	var hctx context.Context
+	select {
+	case hctx = <-started:
+	case <-time.After(failsafe):
+		t.Fatal("timed out waiting for the handler")
+	}
+	q.LoseExtension()
+	c.Advance(jobs.AckWait / 2)
+	if err := hctx.Err(); err != nil {
+		t.Fatalf("the handler's context ended with %v before AckWait passed", err)
+	}
+	c.Advance(jobs.AckWait / 2)
+	select {
+	case <-hctx.Done():
+	case <-time.After(failsafe):
+		t.Fatal("the handler's context under a reactor did not end AckWait after its extension was lost")
 	}
 }
