@@ -1,6 +1,7 @@
 // Package messaging is the standard tier's broker operations: publishing an
-// event, subscribing to events as a reactor source, and appending to and
-// reading back a subject of the broker's stream.
+// event, subscribing to events as a reactor source, appending to and reading
+// back a subject of the broker's stream, and holding durable jobs in a work
+// queue.
 //
 // The package exports:
 //
@@ -12,6 +13,18 @@
 //     its subject's last stream sequence, and reads a subject back as
 //     [Entry] values; and [ErrConflict], the error of an append whose
 //     expected sequence is not the subject's last
+//   - [Queue], which holds durable jobs until a worker acknowledges or the
+//     queue dead-letters them; [Worker], a durable group of workers on it,
+//     with [Worker.Validate], [Worker.Normalize], the form a provider
+//     configures its group from, [Worker.RetryDelay], an attempt's backoff,
+//     and [Worker.Final], whether a delivery is the last attempt
+//   - [DeadLetter], what a dead letter's headers say of its attempts, with
+//     [DeadLetter.Header], which writes them, and [ReadDeadLetter], which
+//     reads them; the header names [HeaderAttempts], [HeaderOutcome], and
+//     [HeaderLastError], and the outcomes [OutcomeError] and
+//     [OutcomeNoError]; [WithDeadLetter], which a provider calls to put a
+//     dead letter's DeadLetter on its handler's context, and
+//     [DeadLetterOf], which reads it
 //   - [Subscription], a durable consumer, with [Subscription.Validate],
 //     [Subscription.Normalize], the form a provider configures its consumer
 //     from, and [Subscription.Matches], its type filter; [Start], where a new
@@ -45,6 +58,14 @@
 // acknowledges, redelivers, or terminates without a broker type in sight,
 // and [Attempt] reads which delivery of the event the handler is on. A
 // source passes the errors it survives to the [Report] given to Subscribe.
+//
+// # Work queues
+//
+// A [Queue] holds durable jobs apart from the broker's stream: each event
+// enqueued waits until one worker of a [Worker] group acknowledges it, or
+// until the queue dead-letters it onto the group's dead-letter subject,
+// where a later worker takes it off. The contract names no broker, so a
+// provider meets it on whatever store holds the jobs.
 //
 // # The runtime
 //
