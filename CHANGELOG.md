@@ -7,6 +7,13 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+### Added
+
+- `Setup.Recorder`, the `event.Options` that `Runtime.Recorder` is built with: its clock, its
+  event ids, and the extension attributes it stamps on every event it emits, a raise's value
+  winning where a name repeats. The zero value records as before. An extension name the event
+  rules reject panics `Build`, a wiring mistake.
+
 ### Changed
 
 - **Breaking:** The `go-core` requirement is v0.13.0, whose `EventKind.Raise` takes a trailing

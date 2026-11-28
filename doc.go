@@ -41,7 +41,9 @@
 //     [Config.Finalize], and [Config.Validate]; [DefaultRelayPoll] and
 //     [DefaultRelayTimeout]
 //   - [Runtime], one service's messaging, which [Setup.Build] builds from a
-//     [Setup]; [Runtime.Relay], the reactor that publishes the outbox;
+//     [Setup]; [Runtime.Recorder], which a domain emits its events through,
+//     built with [Setup.Recorder]; [Runtime.Relay], the reactor that
+//     publishes the outbox;
 //     [Runtime.Consume], which builds a consuming reactor, handing its
 //     handler a [Claim] over the inbox; and [Runtime.Work], which builds a
 //     work queue's worker reactor

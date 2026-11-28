@@ -23,14 +23,19 @@ rt, err := messaging.Setup{
 	Inbox:    postgres.Inbox(),
 	Shutdown: shutdown,
 	Logger:   logger,
+	Recorder: event.Options{Extensions: map[string]string{"layer": "billing"}},
 }.Build()
 ```
 
+`Recorder` stamps its `Extensions` on every event the service emits, so a consumer can tell which
+service or layer an event came from; a raise that sets the same name keeps its own value, and the
+zero `Recorder` stamps none.
+
 `Broker` is any `messaging.Broker`: `memory.New()` in a test, and in production the NATS JetStream
 provider, below. `Shutdown` is the process's drain timeout, within which every reactor the runtime
-builds drains. `Build` panics on a nil `Broker` or `Logger`, a wiring mistake, and returns an
-error for a `Config` that is not finalized, a `Shutdown` that is not positive, or an engine missing
-a statement; it does no I/O. Error handling is elided throughout.
+builds drains. `Build` panics on a nil `Broker` or `Logger`, or on a `Recorder` extension name
+the event rules reject, each a wiring mistake, and returns an error for a `Config` that is not
+finalized, a `Shutdown` that is not positive, or an engine missing a statement; it does no I/O. Error handling is elided throughout.
 
 A domain emits through `rt.Recorder`, in its command's own transaction, so an event is written
 exactly when the state it reports commits:
