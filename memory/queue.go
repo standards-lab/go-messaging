@@ -15,9 +15,6 @@ import (
 
 // Queue is an in-memory [messaging.Queue]. Its zero value is not usable;
 // call [NewQueue].
-//
-// One mutex guards every job, so the job methods never lock; the queue and
-// its sources take mu around them.
 type Queue struct {
 	clock clock
 	mu    sync.Mutex

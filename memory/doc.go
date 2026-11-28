@@ -32,17 +32,16 @@
 //
 // A [Queue] is apart from any [Broker]: it keeps its jobs in enqueue order,
 // each on a subject, the queue's own for an enqueued event and a worker's
-// dead-letter subject for a dead letter, and each job's delivery state
-// with it, so every source on a subject takes from the same jobs. A job's
-// delivery is extended for as long as its handler runs, the in-process
-// form of an extension that always succeeds. A handler whose source drains
-// settles its job by a nil or a permanent error; any other error leaves
-// the job for redelivery at once, as an attempt with no outcome. Each
-// handler's context carries its delivery's end, which
-// [messaging.DeliveryEnd] reads. Enqueue
-// and each dead-lettering store a source and id once on a subject within
-// [messaging.DefaultDuplicates], so a dead letter never collides with its
-// event's enqueue. Like the broker, the queue encodes each job and each
+// dead-letter subject for a dead letter, and each job's delivery state with
+// it, so every source on a subject takes from the same jobs. A job's
+// delivery is extended for as long as its handler runs, the in-process form
+// of an extension that always succeeds. A handler whose source drains
+// settles its job by a nil or a permanent error; any other error leaves the
+// job for redelivery at once, as an attempt with no outcome. Each handler's
+// context carries its delivery's end, which [messaging.DeliveryEnd] reads.
+// Enqueue and each dead-lettering store a source and id once on a subject
+// within [messaging.DefaultDuplicates], so a dead letter never collides with
+// its event's enqueue. Like the broker, the queue encodes each job and each
 // delivery decodes it; one that fails to decode is reported and
 // dead-letters.
 //

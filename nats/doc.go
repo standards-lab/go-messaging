@@ -85,27 +85,27 @@
 // once.
 //
 // The workers subscribed under one Name share one durable pull consumer on
-// their subject, which the source binds at its first Receive; each pulls
-// one job at a time. A work-queue stream refuses a second consumer whose
-// subject overlaps the first's, so one worker group takes each subject. While the handler runs, the source extends the
-// delivery four times per AckWait, and when no extension is answered for
-// AckWait it ends the handler's context, which carries the delivery's end
-// for [messaging.Runtime.Work]. A nil acknowledges the job, and an error
-// naks it with the attempt's [messaging.Worker.RetryDelay]. The handler's
-// context carries the attempt, the server's delivered count. The consumer
-// sets no delivery limit: the source enforces the worker's MaxDeliver, and
-// dead-letters a delivery past it without calling the handler. A permanent
-// error, an error on the final attempt, and a message that does not decode
-// dead-letter the job too. A dead letter is the stored message, unchanged,
-// published on the worker's DeadLetter with the dead-letter headers and a
-// Nats-Msg-Id from that subject and the event's source and id, so it is
-// stored once if dead-lettering repeats; only once the stream holds it is
-// the job acknowledged, and a failed publish naks the job instead, so its
-// next delivery, after the attempt's RetryDelay, dead-letters it again. A
-// source on a dead-letter subject puts each dead letter's
-// [messaging.DeadLetter] on the handler's context. A drained handler's nil
-// settles its job, a permanent error dead-letters it, and any other error
-// naks it at once.
+// their subject, which the source binds at its first Receive; each pulls one
+// job at a time. A work-queue stream refuses a second consumer whose subject
+// overlaps the first's, so one worker group takes each subject. While the
+// handler runs, the source extends the delivery four times per AckWait, and
+// when no extension is answered for AckWait it ends the handler's context,
+// which carries the delivery's end for [messaging.Runtime.Work]. A nil
+// acknowledges the job, and an error naks it with the attempt's
+// [messaging.Worker.RetryDelay]. The handler's context carries the attempt,
+// the server's delivered count. The consumer sets no delivery limit: the
+// source enforces the worker's MaxDeliver, and dead-letters a delivery past
+// it without calling the handler. A permanent error, an error on the final
+// attempt, and a message that does not decode dead-letter the job too. A
+// dead letter is the stored message, unchanged, published on the worker's
+// DeadLetter with the dead-letter headers and a Nats-Msg-Id from that
+// subject and the event's source and id, so it is stored once if
+// dead-lettering repeats; only once the stream holds it is the job
+// acknowledged, and a failed publish naks the job instead, so its next
+// delivery, after the attempt's RetryDelay, dead-letters it again. A source
+// on a dead-letter subject puts each dead letter's [messaging.DeadLetter] on
+// the handler's context. A drained handler's nil settles its job, a
+// permanent error dead-letters it, and any other error naks it at once.
 //
 // [Broker.Conn] is the native handle, for uses beyond the standard tier such
 // as request and reply. It belongs in the composition root.

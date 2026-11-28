@@ -79,18 +79,17 @@
 // A [Runtime] is one service's messaging: the broker, the outbox and inbox
 // over its database engine's statements, and the recorder its domains emit
 // through. Its [Runtime.Relay] publishes the outbox, its [Runtime.Consume]
-// builds a consuming reactor that decodes each event into the consumer's
-// own type and binds its inbox claim, and its [Runtime.Work] builds a
-// reactor that runs a work queue's jobs, decoded the same way. The failures both
+// builds a consuming reactor that decodes each event into the consumer's own
+// type and binds its inbox claim, and its [Runtime.Work] builds a reactor
+// that runs a work queue's jobs, decoded the same way. The failures they
 // survive reach the hook set as [Setup.OnFailure], each as a [Failure], and
 // are logged at warn without one. Under a [Setup.Gate], the relay holds a
 // quiesce gate for each outbox row and a consumer or worker for each
 // delivery, so an operation that holds the gate exclusively runs with them
-// all paused.
-// [Config] is the service's messaging configuration block, beside its
-// provider's. The runtime registers nothing: the composition root makes the
-// broker and each reactor a node of its graph, and the coordinator infers
-// from their methods how to start, drain, and watch them.
+// all paused. [Config] is the service's messaging configuration block,
+// beside its provider's. The runtime registers nothing: the composition root
+// makes the broker and each reactor a node of its graph, and the coordinator
+// infers from their methods how to start, drain, and watch them.
 //
 // # Providers and engines
 //

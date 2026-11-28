@@ -142,10 +142,10 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   own: a delivery past the final attempt, as when the final attempt ended unsettled, reaches the
   worker, which dead-letters it with the no-error outcome without running the handler. A server
   limit would stop delivering the job once reached, so a dead letter that failed on the last
-  delivery it allowed could never be retried. A failed attempt naks with the attempt's RetryDelay; JetStream's consumer
-  BackOff applies only to ack timeouts, so it is unset. A drained handler's error naks at once,
-  unless it is permanent. A message whose metadata does not parse is terminated, since it has no
-  attempt count to dead-letter with.
+  delivery it allowed could never be retried. A failed attempt naks with the attempt's RetryDelay;
+  JetStream's consumer BackOff applies only to ack timeouts, so it is unset. A drained handler's
+  error naks at once, unless it is permanent. A message whose metadata does not parse is terminated,
+  since it has no attempt count to dead-letter with.
 - **Dead letters.** A permanent error, an error on the final attempt, the delivery past it, and
   a message that does not decode dead-letter the job: the worker publishes the stored message's
   data and headers, less the `Nats-` headers, with the dead-letter headers, on its dead-letter
@@ -201,15 +201,14 @@ StartNew case publishes its later events only once the member is ready. The drai
 is short, so a lost acknowledgement would redeliver within the watch, which runs to twice AckWait
 past the handler's start, leaving a provider room for its own margin.
 
-The queue's cases take a `QueueHarness` whose `Advance` passes the queue's time: the memory
-provider moves its test clock, and a real-time provider waits. Each AckWait and Backoff is a
-multiple of the harness's `Unit`. A case that proves an absence advances past the moment the
-unwanted delivery would come due, then enqueues a later event and waits for it: a queue delivers
-a due redelivery before a new event, so the later event's arrival shows the queue has acted. A
-JetStream consumer does: it serves its redelivery queue before the stream's new messages, and a
-nak with a delay re-arms its redelivery timer within milliseconds. A
-case advances only once the job it times has settled, shown by a later event's arrival, so the
-backoff runs from a known time.
+The queue's cases take a `QueueHarness` whose `Advance` passes the queue's time: the memory provider
+moves its test clock, and a real-time provider waits. Each AckWait and Backoff is a multiple of the
+harness's `Unit`. A case that proves an absence advances past the moment the unwanted delivery would
+come due, then enqueues a later event and waits for it: a queue delivers a due redelivery before a
+new event, so the later event's arrival shows the queue has acted. A JetStream consumer does: it
+serves its redelivery queue before the stream's new messages, and a nak with a delay re-arms its
+redelivery timer within milliseconds. A case advances only once the job it times has settled, shown
+by a later event's arrival, so the backoff runs from a known time.
 
 ## Development configuration
 
