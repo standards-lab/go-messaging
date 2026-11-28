@@ -78,11 +78,9 @@ func (b *Broker) Start(ctx context.Context) (err error) {
 			b.starting.Store(false)
 		}
 	}()
-	var ready func(context.Context, jetstream.JetStream) (jetstream.Stream, error)
+	ready := b.bind
 	if b.cfg.owner() {
 		ready = b.provision
-	} else {
-		ready = b.bind
 	}
 	c, err := connect(ctx, b.cfg.URL, b.cfg.Name, ready)
 	if err != nil {

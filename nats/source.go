@@ -127,8 +127,8 @@ func (p *puller) receive(ctx context.Context, c *conn, deliver func(context.Cont
 			p.reportf(ctx, "pull: %w", err)
 			failures++
 			if c.nc.IsConnected() && (errors.Is(err, natsgo.ErrNoResponders) || failures >= failuresBeforeCheck) {
-				if gone := gone(ctx, cons); gone != nil {
-					return fmt.Errorf("nats: receive %s: %w", p.name, gone)
+				if cause := gone(ctx, cons); cause != nil {
+					return fmt.Errorf("nats: receive %s: %w", p.name, cause)
 				}
 			}
 			select {
