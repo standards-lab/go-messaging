@@ -139,9 +139,24 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   pulls again still removes the job, so a late outcome is lost only to a redelivery already
   taken.
 - **Outcomes.** The consumer's MaxDeliver is one past the worker's, so the delivery past the
-  final attempt reaches the worker, which does not run the handler. A failed attempt naks with
-  the attempt's RetryDelay; JetStream's consumer BackOff applies only to ack timeouts, so it is
-  unset. A drained handler's error naks at once.
+  final attempt reaches the worker, which dead-letters it with the no-error outcome without
+  running the handler. A failed attempt naks with the attempt's RetryDelay; JetStream's consumer
+  BackOff applies only to ack timeouts, so it is unset. A drained handler's error naks at once,
+  unless it is permanent. A message whose metadata does not parse is terminated, since it has no
+  attempt count to dead-letter with.
+- **Dead letters.** A permanent error, an error on the final attempt, the delivery past it, and
+  a message that does not decode dead-letter the job: the worker publishes the stored message's
+  data and headers, less the `Nats-` headers, with the dead-letter headers, on its dead-letter
+  subject, and acknowledges the job only once the publish returns, so a job leaves the queue
+  only after its dead letter is stored. A failed publish is reported and naks the job with the
+  attempt's RetryDelay, so the next delivery dead-letters it again. The dead letter's
+  `Nats-Msg-Id` is `d`, the dead-letter subject's length, `:`, the subject, and then the
+  event's enqueue id; an undecodable message's has `#` and its stream sequence in place of the
+  enqueue id. An enqueue id starts with a digit, so a dead letter is never a duplicate of an
+  enqueue, and a repeated dead-lettering, as when the acknowledgement after the publish is lost,
+  is dropped within the deduplication window. The delivery past the final attempt can still fail
+  its publish: the consumer then delivers the job no more, and it stays on the stream until
+  MaxAge discards it or an operator acts.
 
 ## outbox: the relay's transactions
 

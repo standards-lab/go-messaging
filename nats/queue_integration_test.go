@@ -8,10 +8,12 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	natsgo "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/standards-lab/go-core/config"
@@ -34,12 +36,11 @@ func TestQueueConformance(t *testing.T) {
 		stream, subject, dead := natstest.ScratchQueue(t, url)
 		q := startedQueue(t, nats.QueueConfig{URL: url, Stream: stream, Subject: subject, DeadLetter: dead, Owner: new(true)})
 		return messagingtest.QueueHarness{
-			Queue:          q,
-			Unit:           250 * time.Millisecond,
-			Advance:        time.Sleep,
-			DeadLetter:     dead,
-			Runtime:        workRuntime(t),
-			SkipDeadLetter: true,
+			Queue:      q,
+			Unit:       250 * time.Millisecond,
+			Advance:    time.Sleep,
+			DeadLetter: dead,
+			Runtime:    workRuntime(t),
 		}
 	})
 }
@@ -290,5 +291,149 @@ func TestQueueLostExtensionEndsHandler(t *testing.T) {
 	}
 	if waited := time.Since(lost); waited > w.AckWait+w.AckWait/2 {
 		t.Errorf("the handler's context ended %v after the extension was lost, want within AckWait %v and an extension's interval", waited, w.AckWait)
+	}
+}
+
+func held(t *testing.T, js jetstream.JetStream, stream, subject string) uint64 {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+	s, err := js.Stream(ctx, stream)
+	if err != nil {
+		t.Fatalf("stream %s: %v", stream, err)
+	}
+	info, err := s.Info(ctx, jetstream.WithSubjectFilter(subject))
+	if err != nil {
+		t.Fatalf("stream %s info: %v", stream, err)
+	}
+	return info.State.Subjects[subject]
+}
+
+func holding(t *testing.T, js jetstream.JetStream, stream string, want map[string]uint64) func() bool {
+	return func() bool {
+		for subject, n := range want {
+			if held(t, js, stream, subject) != n {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+func rawPublish(t *testing.T, js jetstream.JetStream, msg *natsgo.Msg) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+	if _, err := js.PublishMsg(ctx, msg); err != nil {
+		t.Fatalf("publish on %s: %v", msg.Subject, err)
+	}
+}
+
+func TestQueueDeadLetterStoredOnce(t *testing.T) {
+	q, url, cfg := ownerQueue(t)
+	js := jetStream(t, url)
+	w := messaging.Worker{Name: "once", MaxDeliver: 3, DeadLetter: cfg.DeadLetter}
+	src, err := q.Subscribe(w, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	receive(t, src, func(context.Context, event.Event) error {
+		calls.Add(1)
+		return event.Permanent(errors.New("malformed"))
+	})
+	e := event.Event{ID: "x", Source: "/test", Type: "t"}
+	if err := q.Enqueue(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the dead letter, and the job gone", holding(t, js, cfg.Stream, map[string]uint64{cfg.DeadLetter: 1, cfg.Subject: 0}))
+
+	h, body, err := messaging.Encode(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := &natsgo.Msg{Subject: cfg.Subject, Header: natsgo.Header(h), Data: body}
+	again.Header.Set(jetstream.MsgIDHeader, "again")
+	rawPublish(t, js, again)
+	eventually(t, "the repeat handled and gone", func() bool {
+		return calls.Load() == 2 && held(t, js, cfg.Stream, cfg.Subject) == 0
+	})
+	if n := held(t, js, cfg.Stream, cfg.DeadLetter); n != 1 {
+		t.Errorf("the dead-letter subject holds %d messages after the event was dead-lettered twice, want 1", n)
+	}
+}
+
+func TestQueueDeadLetterStoredBeforeRemoval(t *testing.T) {
+	q, url, cfg := ownerQueue(t)
+	js := jetStream(t, url)
+	full := streamInfo(t, js, cfg.Stream).Config
+	cut := full
+	cut.Subjects = []string{cfg.Subject}
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+	if _, err := js.UpdateStream(ctx, cut); err != nil {
+		t.Fatal(err)
+	}
+	w := messaging.Worker{Name: "before", MaxDeliver: 20, Backoff: []time.Duration{200 * time.Millisecond}, DeadLetter: cfg.DeadLetter}
+	src, err := q.Subscribe(w, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	receive(t, src, func(context.Context, event.Event) error {
+		calls.Add(1)
+		return event.Permanent(errors.New("malformed"))
+	})
+	if err := q.Enqueue(t.Context(), event.Event{ID: "x", Source: "/test", Type: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the job's redelivery after its dead letter failed", func() bool { return calls.Load() >= 2 })
+	if n := held(t, js, cfg.Stream, cfg.Subject); n != 1 {
+		t.Errorf("the work subject holds %d jobs while the dead letter cannot be stored, want 1", n)
+	}
+
+	if _, err := js.UpdateStream(ctx, full); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the dead letter, and the job gone", holding(t, js, cfg.Stream, map[string]uint64{cfg.DeadLetter: 1, cfg.Subject: 0}))
+}
+
+func TestQueueUndecodableDeadLetters(t *testing.T) {
+	q, url, cfg := ownerQueue(t)
+	js := jetStream(t, url)
+	w := messaging.Worker{Name: "undecodable", MaxDeliver: 3, DeadLetter: cfg.DeadLetter}
+	src, err := q.Subscribe(w, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	receive(t, src, func(context.Context, event.Event) error {
+		calls.Add(1)
+		return nil
+	})
+	rawPublish(t, js, &natsgo.Msg{Subject: cfg.Subject, Header: natsgo.Header{"note": {"kept"}}, Data: []byte("not an event")})
+	eventually(t, "the dead letter, and the message gone", holding(t, js, cfg.Stream, map[string]uint64{cfg.DeadLetter: 1, cfg.Subject: 0}))
+	if n := calls.Load(); n != 0 {
+		t.Errorf("the handler ran %d times on an undecodable message, want none", n)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), failsafe)
+	defer cancel()
+	s, err := js.Stream(ctx, cfg.Stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.GetLastMsgForSubject(ctx, cfg.DeadLetter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(m.Data) != "not an event" || m.Header.Get("note") != "kept" {
+		t.Errorf("dead letter %q with note %q, want the message unchanged", m.Data, m.Header.Get("note"))
+	}
+	d, err := messaging.ReadDeadLetter(event.Header(m.Header))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Attempts != 1 || !d.Errored || d.Err == "" {
+		t.Errorf("dead letter %+v, want one attempt ending in the decoding error", d)
 	}
 }

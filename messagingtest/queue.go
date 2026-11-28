@@ -35,9 +35,6 @@ type QueueHarness struct {
 	// reactor cases' workers. Its drain timeout must be long enough that a
 	// handler ending at the drain unwinds within half of it.
 	Runtime *messaging.Runtime
-	// SkipDeadLetter skips the cases that dead-letter, for a provider that
-	// does not dead-letter yet.
-	SkipDeadLetter bool
 }
 
 // RunQueue runs the work queue's conformance cases, each as a subtest on a
@@ -46,31 +43,26 @@ func RunQueue(t *testing.T, newQueue func(t *testing.T) QueueHarness) {
 	cases := []struct {
 		name string
 		fn   func(*testing.T, QueueHarness)
-		dead bool
 	}{
-		{"EnqueueHolds", testEnqueueHolds, false},
-		{"EnqueueRejectsInvalid", testEnqueueRejectsInvalid, false},
-		{"EnqueueDeduplicates", testEnqueueDeduplicates, false},
-		{"WorkersShareQueue", testWorkersShareQueue, false},
-		{"ExtensionKeepsClaim", testExtensionKeepsClaim, false},
-		{"AckRemoves", testAckRemoves, false},
-		{"ErrorBacksOff", testErrorBacksOff, false},
-		{"PermanentDeadLetters", testPermanentDeadLetters, true},
-		{"FinalAttemptDeadLetters", testFinalAttemptDeadLetters, true},
-		{"UnsettledFinalDeadLetters", testUnsettledFinalDeadLetters, true},
-		{"DeadLetterWorkerAcks", testDeadLetterWorkerAcks, true},
-		{"SubscribeRejectsInvalidWorker", testSubscribeRejectsInvalidWorker, false},
-		{"DrainKeepsNil", testDrainKeepsNil, false},
-		{"DrainRedeliversError", testDrainRedeliversError, false},
-		{"ReactorDrainEndsHandler", testReactorDrainEndsHandler, false},
+		{"EnqueueHolds", testEnqueueHolds},
+		{"EnqueueRejectsInvalid", testEnqueueRejectsInvalid},
+		{"EnqueueDeduplicates", testEnqueueDeduplicates},
+		{"WorkersShareQueue", testWorkersShareQueue},
+		{"ExtensionKeepsClaim", testExtensionKeepsClaim},
+		{"AckRemoves", testAckRemoves},
+		{"ErrorBacksOff", testErrorBacksOff},
+		{"PermanentDeadLetters", testPermanentDeadLetters},
+		{"FinalAttemptDeadLetters", testFinalAttemptDeadLetters},
+		{"UnsettledFinalDeadLetters", testUnsettledFinalDeadLetters},
+		{"DeadLetterWorkerAcks", testDeadLetterWorkerAcks},
+		{"SubscribeRejectsInvalidWorker", testSubscribeRejectsInvalidWorker},
+		{"DrainKeepsNil", testDrainKeepsNil},
+		{"DrainRedeliversError", testDrainRedeliversError},
+		{"ReactorDrainEndsHandler", testReactorDrainEndsHandler},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := newQueue(t)
-			if c.dead && h.SkipDeadLetter {
-				t.Skip("the provider does not dead-letter yet")
-			}
-			c.fn(t, h)
+			c.fn(t, newQueue(t))
 		})
 	}
 }

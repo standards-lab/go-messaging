@@ -17,6 +17,12 @@ changelog covers this sub-module only; the base module keeps its own.
   durable pull consumer, whose MaxDeliver is one past the worker's; each holds one job at a time,
   extends its delivery while the handler runs, ends the handler's context when no extension is
   answered for AckWait, acknowledges a nil, and naks an error with the attempt's retry delay.
+  A permanent error, an error on the final attempt, the delivery past it, and a message that
+  does not decode dead-letter the job: the message, unchanged but for the dead-letter headers,
+  is published on the worker's dead-letter subject with a `Nats-Msg-Id` of its own, so it is
+  stored once, and the job is acknowledged only after the stream holds it. A worker on a
+  dead-letter subject puts each dead letter's `messaging.DeadLetter` on the handler's context.
+  The provider passes `messagingtest.RunQueue`.
 - `natstest.ScratchQueue`, a stream and a work queue's subjects unique to the test.
 
 ### Changed

@@ -93,8 +93,17 @@
 // naks it with the attempt's [messaging.Worker.RetryDelay]. The handler's
 // context carries the attempt, the server's delivered count, and the
 // consumer allows one delivery past the worker's MaxDeliver, which the
-// source settles without calling the handler. A drained handler's nil or
-// permanent error settles its job, and any other error naks it at once.
+// source dead-letters without calling the handler. A permanent error, an
+// error on the final attempt, and a message that does not decode
+// dead-letter the job too. A dead letter is the stored message, unchanged,
+// published on the worker's DeadLetter with the dead-letter headers and a
+// Nats-Msg-Id from that subject and the event's source and id, so it is
+// stored once if dead-lettering repeats; only once the stream holds it is
+// the job acknowledged, and a failed publish naks the job instead. A
+// source on a dead-letter subject puts each dead letter's
+// [messaging.DeadLetter] on the handler's context. A drained handler's nil
+// settles its job, a permanent error dead-letters it, and any other error
+// naks it at once.
 //
 // [Broker.Conn] is the native handle, for uses beyond the standard tier such
 // as request and reply. It belongs in the composition root.
