@@ -7,6 +7,14 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ## [Unreleased]
 
+### Added
+
+- `memory.Queue`, with `memory.NewQueue`: the memory provider's work queue, a `messaging.Queue`
+  apart from its `Broker`.
+- `messagingtest.RunQueue`, the work queue's conformance suite, with `messagingtest.QueueHarness`,
+  the queue under test and the time it runs on, which a provider on an injected clock advances
+  and a real-time provider waits out.
+
 ## [v0.4.0] - 2026-11-27
 
 ### Added

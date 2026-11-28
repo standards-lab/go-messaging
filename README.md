@@ -30,10 +30,10 @@ its provider's.
   broker, quarantining a row that can never be published. `Outbox.Relay` takes its report,
   per-row timeout, last-pass drain, and gate as one `outbox.RelayOptions` value.
 - `inbox` is a consumer's claim on an event, so a redelivery is handled once.
-- `memory` is the in-memory provider, a `Broker` and a `Journal`, for a service's tests and the
-  conformance double.
-- `messagingtest` is the conformance suite every provider passes: `Run` for the broker, and
-  `RunJournal` for the journal.
+- `memory` is the in-memory provider, a `Broker` and a `Journal`, and a `Queue` beside them, for
+  a service's tests and the conformance double.
+- `messagingtest` is the conformance suite every provider passes: `Run` for the broker,
+  `RunJournal` for the journal, and `RunQueue` for the work queue.
 - `postgres` (sub-module) is the PostgreSQL engine: the outbox's and inbox's statements, the
   `messaging` migration set, `Verify`, `Pending`, and the retentions, `OutboxRetention` and
   `InboxRetention`, that delete aged published and handled rows a budget at a time.

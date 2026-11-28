@@ -7,6 +7,9 @@
 //     constructor, each case as a subtest
 //   - [RunJournal], which runs the journal's cases against brokers that are
 //     also a [messaging.Journal], each case as a subtest
+//   - [RunQueue], which runs the work queue's cases against queues from a
+//     provider's constructor, each case as a subtest, and [QueueHarness],
+//     the queue under test with the time it runs on
 //
 // A provider's test calls [Run] with a constructor for a fresh broker; each
 // case runs its sources through a [reactor.Reactor], as a composition root
@@ -34,4 +37,21 @@
 // a read stopped early holds nothing that blocks an append. An appended
 // event reaches the broker's subscriptions, and a type filter matches its
 // subject, not its type.
+//
+// The queue's cases run each worker's source directly, as its Receive,
+// because a reactor detaches its handlers from the source's cancellation
+// and the cases watch the handler's context end. They prove the job's
+// life: an enqueued event waits for a worker, is stored once for its
+// source and id, and goes to one worker of a group at a time; a delivery
+// is extended past AckWait while its handler runs; a nil acknowledges, an
+// error redelivers after its attempt's backoff, and a permanent error or a
+// failed final attempt dead-letters the event, unchanged, with headers
+// that say how its attempts ended. A final attempt left unsettled by a
+// drained worker dead-letters on the next delivery without calling the
+// handler. A dead-letter worker receives each dead letter with its
+// [messaging.DeadLetter] and acknowledges it off. A drained handler's
+// context ends; its nil holds and its error leaves the job for
+// redelivery. Time passes through [QueueHarness.Advance], and a case that
+// proves an absence enqueues a later event and waits for it, so the queue
+// has acted on whatever was due before it.
 package messagingtest

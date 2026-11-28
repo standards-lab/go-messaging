@@ -32,6 +32,39 @@ MaxDeliver deliveries have been made; expired deliveries count toward MaxDeliver
   handler's outcome holds. A message that cannot decode can never be handled, so it is terminated
   and reported, since no handler sees it.
 
+## memory: the queue's jobs
+
+A `Queue` keeps its jobs in one slice, in enqueue order, under one mutex; every method on it runs
+with the mutex held and is given the time, read from the queue's clock. A job is available,
+claimed by one delivery, or gone:
+
+```text
+store ──take──▶ claimed ──settle(nil)──▶ gone
+  ▲               │  ├──settle(Permanent, or error on the final attempt)──▶ dead letter, gone
+  │ once due      │  └──settle(error)──▶ available after RetryDelay(attempt)
+  └───────────────┘ expiry, or a drained handler's error: available at once
+```
+
+- `take` sweeps expired claims, then claims the earliest-due redelivery on the worker's subject,
+  or else the first new job. A job whose attempts have reached the worker's MaxDeliver is not
+  claimed: it dead-letters with the no-error outcome, since a failed final attempt has already
+  dead-lettered, and `take` looks again.
+- A claim is extended while its handler runs: the sweep moves an extending claim's deadline to
+  AckWait past the time it is given, so no member's sweep can expire it. The test hook that loses
+  extension fixes the deadline at AckWait past the loss; the member's watcher waits on the clock
+  for it, and the sweep that expires the claim cancels the handler's context.
+- `settle` sweeps first and ignores an outcome whose claim has gone, as the broker's consumer
+  ignores a late token. The handler's context is a child of the member's, so a drain ends it; a
+  nil or a permanent error from it still settles, and any other error makes the job available
+  at once, an attempt with no outcome.
+- A dead letter is stored like an enqueue, on the worker's dead-letter subject, its slot the
+  subject with the event's source and id, so it is never a duplicate of its own enqueue and is
+  stored once if dead-lettering repeats. The test hook that keeps the next dead-lettered job is
+  how a repeat is made.
+- The clock is the wall clock, or a test clock whose timers fire as it advances. A member
+  registers its timer under the mutex, at an absolute time, so an advance cannot fall between
+  reading the time and waiting.
+
 ## nats: the stream and its consumers
 
 - **Capture.** A non-owner binds the stream and checks that its subjects capture every subject
@@ -124,6 +157,14 @@ happen. A provider may create a StartNew consumer as late as the source's first 
 StartNew case publishes its later events only once the member is ready. The drain case's AckWait
 is short, so a lost acknowledgement would redeliver within the watch, which runs to twice AckWait
 past the handler's start, leaving a provider room for its own margin.
+
+The queue's cases take a `QueueHarness` whose `Advance` passes the queue's time: the memory
+provider moves its test clock, and a real-time provider waits. Each AckWait and Backoff is a
+multiple of the harness's `Unit`. A case that proves an absence advances past the moment the
+unwanted delivery would come due, then enqueues a later event and waits for it: a queue delivers
+a due redelivery before a new event, so the later event's arrival shows the queue has acted. A
+case advances only once the job it times has settled, shown by a later event's arrival, so the
+backoff runs from a known time.
 
 ## Development configuration
 
