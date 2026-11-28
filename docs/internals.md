@@ -58,9 +58,8 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   nil or a permanent error from it still settles, and any other error makes the job available
   at once, an attempt with no outcome.
 - A dead letter is stored like an enqueue, on the worker's dead-letter subject, its slot the
-  subject with the event's source and id, so it is never a duplicate of its own enqueue and is
-  stored once if dead-lettering repeats. The test hook that keeps the next dead-lettered job is
-  how a repeat is made.
+  subject with the event's source and id, so it is never a duplicate of its own enqueue; a job is removed as it is
+  dead-lettered, so it is dead-lettered once.
 - The clock is the wall clock, or a test clock whose timers fire as it advances. A member
   registers its timer under the mutex, at an absolute time, so an advance cannot fall between
   reading the time and waiting.

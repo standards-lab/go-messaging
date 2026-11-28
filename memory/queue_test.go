@@ -2,7 +2,6 @@ package memory_test
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -179,30 +178,6 @@ func TestQueueLostExtensionEndsHandler(t *testing.T) {
 	}
 	if n := ran.count("x"); n != 1 {
 		t.Errorf("the handler ran %d times, want once: the redelivery past the final attempt dead-letters", n)
-	}
-}
-
-func TestQueueDeadLetterStoredOnce(t *testing.T) {
-	q, _ := memory.NewQueueOnClock()
-	var dl worked
-	receive(t, q, jobs, func(context.Context, event.Event) error { return errors.New("always") })
-	receive(t, q, dead, func(ctx context.Context, e event.Event) error {
-		dl.add(ctx, e)
-		return nil
-	})
-	q.KeepNextDeadLettered()
-	for _, id := range []string{"x", "y"} {
-		if err := q.Enqueue(context.Background(), event.Event{ID: id, Source: "/t", Type: "t"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	waitFor(t, func() bool { return dl.count("y") > 0 }, "the next dead letter")
-	got := dl.deadOf("x")
-	if len(got) != 1 {
-		t.Fatalf("the dead letter was stored %d times, want once", len(got))
-	}
-	if want := (messaging.DeadLetter{Attempts: 1, Errored: true, Err: "always"}); got[0] != want {
-		t.Errorf("DeadLetterOf = %+v, want the first dead-lettering's %+v", got[0], want)
 	}
 }
 

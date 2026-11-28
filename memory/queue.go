@@ -21,7 +21,6 @@ type Queue struct {
 	jobs  []*job
 	seen  map[slot]time.Time
 	wake  chan struct{}
-	keep  bool
 }
 
 type slot struct{ subject, source, id string }
@@ -114,7 +113,7 @@ func (q *Queue) take(w messaging.Worker, cancel context.CancelFunc, now time.Tim
 			return nil, nil, 0, false
 		}
 		if j.attempts >= w.MaxDeliver {
-			q.deadLetter(j, w, messaging.DeadLetter{Attempts: j.attempts}, now)
+			q.deadLetter(j, w, messaging.DeadLetter{Attempts: j.attempts})
 			continue
 		}
 		j.attempts++
@@ -187,22 +186,17 @@ func (q *Queue) settle(w messaging.Worker, j *job, c *claim, err error, drained 
 	case drained && !event.IsPermanent(err):
 		j.due = now
 	case event.IsPermanent(err) || j.attempts >= w.MaxDeliver:
-		q.deadLetter(j, w, messaging.DeadLetter{Attempts: j.attempts, Errored: true, Err: err.Error()}, now)
+		q.deadLetter(j, w, messaging.DeadLetter{Attempts: j.attempts, Errored: true, Err: err.Error()})
 	default:
 		j.due = now.Add(w.RetryDelay(j.attempts))
 	}
 	q.wakeAll()
 }
 
-func (q *Queue) deadLetter(j *job, w messaging.Worker, d messaging.DeadLetter, now time.Time) {
+func (q *Queue) deadLetter(j *job, w messaging.Worker, d messaging.DeadLetter) {
 	h := maps.Clone(j.header)
 	maps.Copy(h, d.Header())
 	q.store(slot{w.DeadLetter, j.slot.source, j.slot.id}, h, j.body)
-	if q.keep {
-		q.keep = false
-		j.due = now
-		return
-	}
 	q.remove(j)
 }
 

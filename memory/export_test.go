@@ -84,9 +84,3 @@ func (q *Queue) LoseExtension() {
 	}
 	q.wakeAll()
 }
-
-func (q *Queue) KeepNextDeadLettered() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.keep = true
-}
