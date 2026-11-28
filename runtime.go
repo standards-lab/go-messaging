@@ -111,9 +111,10 @@ type Setup struct {
 // Build builds the service's messaging that s describes. It panics, before
 // anything else, when Broker or Logger is nil, and, once Config, Shutdown,
 // Outbox, and Inbox are checked, when Recorder names an extension that
-// [event.Event.Validate] rejects: each a wiring mistake in the caller. It returns an error for a Config that does not validate, a
-// Shutdown that is not positive, or an Outbox or Inbox engine missing a
-// statement. It does no I/O.
+// [event.Event.Validate] rejects: each a wiring mistake in the caller. It
+// returns an error for a Config that does not validate, a Shutdown that is
+// not positive, or an Outbox or Inbox engine missing a statement. It does
+// no I/O.
 func (s Setup) Build() (*Runtime, error) {
 	if s.Broker == nil {
 		panic("messaging: Setup.Broker is nil")

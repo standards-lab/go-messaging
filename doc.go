@@ -43,10 +43,9 @@
 //   - [Runtime], one service's messaging, which [Setup.Build] builds from a
 //     [Setup]; [Runtime.Recorder], which a domain emits its events through,
 //     built with [Setup.Recorder]; [Runtime.Relay], the reactor that
-//     publishes the outbox;
-//     [Runtime.Consume], which builds a consuming reactor, handing its
-//     handler a [Claim] over the inbox; and [Runtime.Work], which builds a
-//     work queue's worker reactor
+//     publishes the outbox; [Runtime.Consume], which builds a consuming
+//     reactor, handing its handler a [Claim] over the inbox; and
+//     [Runtime.Work], which builds a work queue's worker reactor
 //   - [Failure], a failure the runtime survives, and [FailureKind], what
 //     failed: [FailureRelay], [FailureQuarantine], [FailureSource], or
 //     [FailureExhausted]
