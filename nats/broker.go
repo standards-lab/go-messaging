@@ -23,10 +23,10 @@ const (
 )
 
 // ErrNotStarted is the failure of a call that needs the connection, made
-// before [Broker.Start].
+// before [Broker.Start] or [Queue.Start].
 var ErrNotStarted = errors.New("nats: broker not started")
 
-// ErrStarted is the failure of a second [Broker.Start].
+// ErrStarted is the failure of a second [Broker.Start] or [Queue.Start].
 var ErrStarted = errors.New("nats: broker already started")
 
 // Broker is a [messaging.Broker] on a JetStream stream.
@@ -78,16 +78,31 @@ func (b *Broker) Start(ctx context.Context) (err error) {
 			b.starting.Store(false)
 		}
 	}()
+	var ready func(context.Context, jetstream.JetStream) (jetstream.Stream, error)
+	if b.cfg.owner() {
+		ready = b.provision
+	} else {
+		ready = b.bind
+	}
+	c, err := connect(ctx, b.cfg.URL, b.cfg.Name, ready)
+	if err != nil {
+		return err
+	}
+	b.conn.Store(c)
+	return nil
+}
+
+func connect(ctx context.Context, url, name string, ready func(context.Context, jetstream.JetStream) (jetstream.Stream, error)) (_ *conn, err error) {
 	timeout := connectWait
 	if d, ok := ctx.Deadline(); ok {
 		timeout = time.Until(d)
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("nats: connect %s: %w", b.cfg.URL, err)
+		return nil, fmt.Errorf("nats: connect %s: %w", url, err)
 	}
-	nc, err := natsgo.Connect(b.cfg.URL, natsgo.Name(b.cfg.Name), natsgo.Timeout(timeout), natsgo.MaxReconnects(-1))
+	nc, err := natsgo.Connect(url, natsgo.Name(name), natsgo.Timeout(timeout), natsgo.MaxReconnects(-1))
 	if err != nil {
-		return fmt.Errorf("nats: connect %s: %w", b.cfg.URL, err)
+		return nil, fmt.Errorf("nats: connect %s: %w", url, err)
 	}
 	defer func() {
 		if err != nil {
@@ -96,19 +111,13 @@ func (b *Broker) Start(ctx context.Context) (err error) {
 	}()
 	js, err := jetstream.New(nc)
 	if err != nil {
-		return fmt.Errorf("nats: %w", err)
+		return nil, fmt.Errorf("nats: %w", err)
 	}
-	var s jetstream.Stream
-	if b.cfg.owner() {
-		s, err = b.provision(ctx, js)
-	} else {
-		s, err = b.bind(ctx, js)
-	}
+	s, err := ready(ctx, js)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	b.conn.Store(&conn{nc: nc, js: js, stream: s})
-	return nil
+	return &conn{nc: nc, js: js, stream: s}, nil
 }
 
 func (b *Broker) provision(ctx context.Context, js jetstream.JetStream) (jetstream.Stream, error) {
@@ -177,7 +186,10 @@ func (b *Broker) Ready() bool {
 // it closes the connection without finishing the drain and returns ctx's
 // error.
 func (b *Broker) Shutdown(ctx context.Context) error {
-	c := b.conn.Load()
+	return b.conn.Load().drain(ctx)
+}
+
+func (c *conn) drain(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}

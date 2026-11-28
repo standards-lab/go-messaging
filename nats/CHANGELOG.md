@@ -7,6 +7,24 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- `Queue`, with `NewQueue` and its `QueueConfig` block: a `messaging.Queue` on a stream with
+  work-queue retention, a lifecycle component that does no I/O until `Start`. The owner creates
+  or updates the stream on file storage over the work subject, the dead-letter subject, and every
+  subject under it; a non-owner binds the stream as it finds it. `Enqueue` stores an event on the
+  work subject with its source and id as `Nats-Msg-Id`. The workers under one name share one
+  durable pull consumer, whose MaxDeliver is one past the worker's; each holds one job at a time,
+  extends its delivery while the handler runs, ends the handler's context when no extension is
+  answered for AckWait, acknowledges a nil, and naks an error with the attempt's retry delay.
+- `natstest.ScratchQueue`, a stream and a work queue's subjects unique to the test.
+
+### Changed
+
+- `ErrNotStarted` and `ErrStarted` also name a `Queue` that is not started, or started twice.
+- The `go-messaging` requirement is replaced by the working tree, for the work-queue contract,
+  until go-messaging v0.5.0 is released.
+
 ## [v0.4.0] - 2026-11-27
 
 ### Added

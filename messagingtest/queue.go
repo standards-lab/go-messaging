@@ -315,14 +315,16 @@ func testExtensionKeepsClaim(t *testing.T, h QueueHarness) {
 	var c calls
 	started := make(chan context.Context, 1)
 	release := make(chan struct{})
-	work(t, h.Queue, w, func(ctx context.Context, e event.Event) error {
+	handler := func(ctx context.Context, e event.Event) error {
 		c.add(ctx, w, e)
 		if e.ID == "long" {
 			started <- ctx
 			<-release
 		}
 		return nil
-	})
+	}
+	work(t, h.Queue, w, handler)
+	work(t, h.Queue, w, handler)
 	enqueue(t, h.Queue, ev("long", "t"))
 	hctx := recvCtx(t, started, "the long handler")
 	h.Advance(4 * w.AckWait)
@@ -333,7 +335,7 @@ func testExtensionKeepsClaim(t *testing.T, h QueueHarness) {
 	close(release)
 	eventually(t, c.has("end"), "the event after the long one")
 	if n := c.count("long"); n != 1 {
-		t.Errorf("the long job was delivered %d times, want once: its claim outlived AckWait", n)
+		t.Errorf("the long job was delivered %d times, want once: the idle worker took it while its claim was extended", n)
 	}
 }
 

@@ -64,3 +64,15 @@ func suffix(t testing.TB) string {
 	}
 	return hex.EncodeToString(b[:])
 }
+
+// ScratchQueue returns a stream name and a work queue's work and dead-letter
+// subjects, messaging.test.<hex>.jobs and messaging.test.<hex>.dead, unique
+// to the test, as a queue's QueueConfig requires of its Stream, Subject,
+// and DeadLetter. Like [Scratch], it creates nothing, and when the test
+// ends it deletes the stream on url's server, tolerating one that nothing
+// created.
+func ScratchQueue(t testing.TB, url string) (stream, subject, deadLetter string) {
+	t.Helper()
+	stream, prefix := Scratch(t, url)
+	return stream, prefix + ".jobs", prefix + ".dead"
+}

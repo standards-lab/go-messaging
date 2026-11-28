@@ -118,6 +118,31 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
 - **Shutdown.** A connection that is reconnecting cannot drain, and its Drain call closes it, so
   Shutdown treats that error, like a closed connection's, as no failure and waits for the close.
 
+## nats: the work queue
+
+- **Stream.** The queue's stream has work-queue retention, so an acknowledged job leaves it. Its
+  subjects are the work subject, the dead-letter subject, and every subject under the latter, so
+  a dead-letter worker's own dead letters stay on the stream. A work-queue stream refuses two
+  consumers whose filters overlap, so one worker group takes each subject. A non-owner checks
+  that a stream subject matches each of the work and dead-letter subjects, token by token with
+  NATS's wildcards, and that one captures every subject under the dead-letter subject, as the
+  broker's capture check does for its prefix.
+- **Pulls.** A worker pulls as the broker's source does, through the same loop, one message at
+  a time, so each member holds one job.
+- **Extension.** While the handler runs, the worker sends an in-progress acknowledgement four
+  times per AckWait as a request, which the server answers, so the worker knows each extension
+  arrived; an unanswered one is reported. Each request is bounded by the next tick and by the
+  delivery's deadline, so the deadline passes on time while the server is silent. AckWait past
+  the last answered extension, the handler's context ends and the worker leaves the job to the
+  server, whose consumer AckWait adds AckMargin and so redelivers after the handler's context
+  has ended. An acknowledgement that arrives after the server's AckWait but before any member
+  pulls again still removes the job, so a late outcome is lost only to a redelivery already
+  taken.
+- **Outcomes.** The consumer's MaxDeliver is one past the worker's, so the delivery past the
+  final attempt reaches the worker, which does not run the handler. A failed attempt naks with
+  the attempt's RetryDelay; JetStream's consumer BackOff applies only to ack timeouts, so it is
+  unset. A drained handler's error naks at once.
+
 ## outbox: the relay's transactions
 
 - Under a gate, the gate is held before a row's transaction begins and released after it
@@ -163,6 +188,8 @@ provider moves its test clock, and a real-time provider waits. Each AckWait and 
 multiple of the harness's `Unit`. A case that proves an absence advances past the moment the
 unwanted delivery would come due, then enqueues a later event and waits for it: a queue delivers
 a due redelivery before a new event, so the later event's arrival shows the queue has acted. A
+JetStream consumer does: it serves its redelivery queue before the stream's new messages, and a
+nak with a delay re-arms its redelivery timer within milliseconds. A
 case advances only once the job it times has settled, shown by a later event's arrival, so the
 backoff runs from a known time.
 
