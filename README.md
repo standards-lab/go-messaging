@@ -25,7 +25,10 @@ its provider's.
   `Subscription` and its `Start`, the delivery `Attempt`, the source's `Report`, `Config`, the
   `Runtime` with its `Relay` and `Consume` reactors, the `Setup` whose `Build` builds it, the
   error hook's `Failure` and `Hook`, and the quiesce gate's `Gate`. Its `Journal`, with `Entry`
-  and `ErrConflict`, appends to a subject of the broker's stream and reads the subject back.
+  and `ErrConflict`, appends to a subject of the broker's stream and reads the subject back. Its
+  `Queue`, with `Worker` and `DeadLetter`, holds durable jobs apart from the broker's stream
+  until one worker of a group acknowledges each or the queue dead-letters it, and
+  `Runtime.Work` builds the reactor that runs a worker group's jobs.
 - `outbox` writes a command's events in the command's own transaction and relays them to the
   broker, quarantining a row that can never be published. `Outbox.Relay` takes its report,
   per-row timeout, last-pass drain, and gate as one `outbox.RelayOptions` value.
@@ -39,7 +42,8 @@ its provider's.
   `InboxRetention`, that delete aged published and handled rows a budget at a time.
 - `nats` (sub-module) is the NATS JetStream provider: the `Broker` on one stream, which is also
   a `Journal`, its `Config` block with the stream's owner switch, and the durable pull consumers
-  its sources bind. Its `natstest` package gives each test its own stream.
+  its sources bind; and the `Queue` on a stream of its own with work-queue retention, with its
+  `QueueConfig` block. Its `natstest` package gives each test its own stream.
 
 The package documentation, `go doc github.com/standards-lab/go-messaging/...`, is the reference
 for each exported name; each package's `doc.go` inventories its exports.
@@ -48,7 +52,7 @@ for each exported name; each package's `doc.go` inventories its exports.
 
 [`docs/usage.md`](docs/usage.md) shows the library in use: wiring the runtime, the NATS broker,
 the relay and consumers as graph nodes, the error hook, quarantine, retention, MaxDeliver
-exhaustion, the quiesce gate, and folding and appending to a stream-backed root.
+exhaustion, the quiesce gate, folding and appending to a stream-backed root, and the work queue.
 
 ## Development
 

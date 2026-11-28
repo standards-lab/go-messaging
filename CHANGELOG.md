@@ -9,6 +9,25 @@ only; the `postgres` and `nats` sub-modules keep their own.
 
 ### Added
 
+- `Queue`, the work-queue contract, which a provider implements apart from `Broker`: `Enqueue`
+  stores an event as a durable job, deduplicated on its source and id like a publish, and
+  `Subscribe` returns a source of a worker group's jobs. Each member claims one job at a time,
+  and its delivery is extended while the handler runs; when no extension succeeds for AckWait,
+  the handler's context ends. A nil acknowledges the job, an error redelivers it after the
+  attempt's retry delay, and an `event.Permanent` error, any error on the final attempt, and a
+  final attempt left unsettled dead-letter it: the event, unchanged, is stored once on the
+  worker's dead-letter subject with headers saying how its attempts ended, and only then does
+  the job leave the queue. A drained handler's context ends, and its job is settled or left
+  for redelivery.
+- `Worker`, a durable group of workers on a queue: `Name`, `Subject` (empty for the enqueued
+  jobs, or a dead-letter subject), `MaxDeliver`, which must be positive, `AckWait`
+  (`DefaultAckWait` when unset), `Backoff`, and `DeadLetter`, required, with `Validate`,
+  `Normalize`, `RetryDelay`, an attempt's backoff, and `Final`, whether a delivery is the last
+  attempt.
+- `DeadLetter`, what a dead letter's headers say of its attempts, with `DeadLetter.Header` and
+  `ReadDeadLetter`; the headers `HeaderAttempts`, `HeaderOutcome`, and `HeaderLastError`, and
+  the outcomes `OutcomeError` and `OutcomeNoError`. `WithDeadLetter` puts a dead letter's
+  `DeadLetter` on a dead-letter worker's handler context, and `DeadLetterOf` reads it.
 - `memory.Queue`, with `memory.NewQueue`: the memory provider's work queue, a `messaging.Queue`
   apart from its `Broker`.
 - `messagingtest.RunQueue`, the work queue's conformance suite, with `messagingtest.QueueHarness`,
