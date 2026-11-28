@@ -673,6 +673,9 @@ func TestWork(t *testing.T) {
 		defer deadMu.Unlock()
 		return len(dead) == 2
 	})
+	waitFor(t, "the worker's seven deliveries logged", func() bool {
+		return strings.Count(log.String(), "worker=worker ") >= 7
+	})
 
 	lines := strings.Split(strings.TrimSpace(log.String()), "\n")
 	outcomes := func(id string) []string {
