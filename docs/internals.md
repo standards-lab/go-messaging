@@ -58,8 +58,8 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   nil or a permanent error from it still settles, and any other error makes the job available
   at once, an attempt with no outcome.
 - A dead letter is stored like an enqueue, on the worker's dead-letter subject, its slot the
-  subject with the event's source and id, so it is never a duplicate of its own enqueue; a job is removed as it is
-  dead-lettered, so it is dead-lettered once.
+  subject with the event's source and id, so it is never a duplicate of its own enqueue. A job is
+  removed as it is dead-lettered, so it is dead-lettered once.
 - The clock is the wall clock, or a test clock whose timers fire as it advances. A member
   registers its timer under the mutex, at an absolute time, so an advance cannot fall between
   reading the time and waiting.
@@ -131,12 +131,12 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
 - **Extension.** While the handler runs, the worker sends an in-progress acknowledgement four
   times per AckWait as a request, which the server answers, so the worker knows each extension
   arrived; an unanswered one is reported. Each request is bounded by the next tick and by the
-  delivery's deadline, so the deadline passes on time while the server is silent. AckWait past
-  the last answered extension, the handler's context ends and the worker leaves the job to the
-  server, whose consumer AckWait adds AckMargin and so redelivers after the handler's context
-  has ended. An acknowledgement that arrives after the server's AckWait but before any member
-  pulls again still removes the job, so a late outcome is lost only to a redelivery already
-  taken.
+  delivery's deadline, so the deadline passes on time while the server is silent. Once AckWait
+  has passed since the last answered extension, the handler's context ends and the worker leaves
+  the job to the server, whose consumer AckWait adds AckMargin and so redelivers after the
+  handler's context has ended. An acknowledgement that arrives after the server's AckWait but
+  before any member pulls again still removes the job, so a late outcome is lost only to a
+  redelivery already taken.
 - **Outcomes.** The consumer sets no delivery limit, MaxDeliver -1, and the worker enforces its
   own: a delivery past the final attempt, as when the final attempt ended unsettled, reaches the
   worker, which dead-letters it with the no-error outcome without running the handler. A server
@@ -161,7 +161,7 @@ store ──take──▶ claimed ──settle(nil)──▶ gone
   worker's AckWait plus AckMargin, has passed, so `Subscribe` rejects a worker whose AckWait plus
   AckMargin is not less than the window the queue configures, `messaging.DefaultDuplicates`.
   AckWait bounds a delivery between extensions, not the handler's run time, so the bound limits
-  no job's length. The bound is that window rather than a bound stream's own: a worker is
+  no job's length. The check uses that window rather than the bound stream's own: a worker is
   subscribed with no I/O, before its queue need have started, so the stream's window is not yet
   known. Since the consumer has no delivery limit, a publish that fails on a delivery past the
   final attempt is retried on the next delivery too, RetryDelay later, so the job always ends as

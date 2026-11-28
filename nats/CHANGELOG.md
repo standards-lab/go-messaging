@@ -27,8 +27,8 @@ changelog covers this sub-module only; the base module keeps its own.
   runs again, so the job always ends as a dead letter. `Subscribe` rejects a worker whose
   AckWait plus `AckMargin` is not less than `messaging.DefaultDuplicates`, so a dead letter
   repeated after a lost acknowledgement falls within the deduplication window; AckWait bounds a
-  delivery between extensions, not a job's run time. A worker on a dead-letter subject puts each dead
-  letter's `messaging.DeadLetter` on the handler's context. The provider passes
+  delivery between extensions, not a job's run time. A worker on a dead-letter subject puts each
+  dead letter's `messaging.DeadLetter` on the handler's context. The provider passes
   `messagingtest.RunQueue`.
 - `natstest.ScratchQueue`, a stream and a work queue's subjects unique to the test.
 

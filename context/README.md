@@ -26,6 +26,10 @@ written detail when a session is about to build it.
   ([doc.go](../doc.go), [journal.go](../journal.go)), implemented by the memory and NATS
   providers ([memory/doc.go](../memory/doc.go), [nats/doc.go](../nats/doc.go)) and proven by
   `messagingtest.RunJournal` ([messagingtest/doc.go](../messagingtest/doc.go)).
+- **Work queue** (built): `messaging.Queue`, its `Worker` groups and dead letters, and
+  `Runtime.Work` ([doc.go](../doc.go), [queue.go](../queue.go)), implemented by the memory and
+  NATS providers and proven by `messagingtest.RunQueue`
+  ([docs/usage.md, "The work queue"](../docs/usage.md#the-work-queue)).
 - **Runtime and its error hook** (built): the root package ([runtime.go](../runtime.go),
   [config.go](../config.go), [failure.go](../failure.go)).
 - **Outbox** (built): the outbox, with poison-row quarantine ([outbox/doc.go](../outbox/doc.go)).

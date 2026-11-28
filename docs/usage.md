@@ -308,19 +308,22 @@ w := messaging.Worker{
 }
 ```
 
-`Subject` is empty for the jobs enqueued, or a dead-letter subject for a dead-letter worker,
-below. `Worker.Validate` reports every way a worker is unusable, together: a `Name` that fails
-`messaging.CheckName`, a set `Subject` or a `DeadLetter` that fails `messaging.CheckType`, a
-`MaxDeliver` that is not positive, a negative `AckWait` or `Backoff` entry, and a `DeadLetter`
-that is missing or is the worker's own `Subject`. The queue's `Subscribe` validates the worker
-and fails on an unusable one, so `Runtime.Work` does too. The NATS queue's `Subscribe` also
-rejects an `AckWait` of `messaging.DefaultDuplicates` less `nats.AckMargin`, 1m59.75s, or more,
-and the error names that bound: a dead letter's repeat after a lost acknowledgement comes
-`AckWait` plus the margin later, and is dropped only within the deduplication window. `AckWait`
-is how long a delivery lasts between extensions, not how long the job may run, so a job that runs
-for hours keeps an `AckWait` well inside the bound. `Worker.RetryDelay(n)` is how long a
-job waits after failed attempt `n`: `Backoff[n-1]`, the last entry past the end, and 0, a
-redelivery at once, with no `Backoff`.
+`Subject` is empty for the jobs enqueued, or a dead-letter subject for a dead-letter worker
+([Dead letters](#dead-letters)). `Worker.Validate` reports every way a worker is unusable,
+together: a `Name` that fails `messaging.CheckName`, a set `Subject` or a `DeadLetter` that fails
+`messaging.CheckType`, a `MaxDeliver` that is not positive, a negative `AckWait` or `Backoff`
+entry, and a `DeadLetter` that is missing or is the worker's own `Subject`. The queue's
+`Subscribe` validates the worker and fails on an unusable one, so `Runtime.Work` does too.
+
+The NATS queue's `Subscribe` also rejects an `AckWait` of 1m59.75s or more, which is
+`messaging.DefaultDuplicates` less `nats.AckMargin`, and its error names that bound. A dead
+letter repeated after a lost acknowledgement comes `AckWait` plus the margin later, and the
+stream drops the repeat only within its deduplication window. `AckWait` is how long a delivery
+lasts between extensions, not how long the job may run, so a job that runs for hours keeps an
+`AckWait` well inside the bound.
+
+`Worker.RetryDelay(n)` is how long a job waits after failed attempt `n`: `Backoff[n-1]`; the last
+entry once `n` passes the end of `Backoff`; and 0, a redelivery at once, when `Backoff` is empty.
 
 `rt.Work` builds the reactor that runs a worker group's jobs, the queue's counterpart of
 `rt.Consume`. It decodes each job's data into the worker's own type and hands it to the handler;
@@ -339,10 +342,10 @@ The reactor logs each delivery with the worker, the event's type, id, and subjec
 and its outcome: `job worked` at info when handled or retried, `job refused` at warn for a
 permanent error, and `job exhausted` at warn for an error on the final attempt. It reports each
 error its source survives to the hook as a `source` failure naming the worker. Under a
-`Setup.Gate`, each delivery holds the gate for the handler's whole call, as a consumer's does;
-the job's delivery is extended while it waits, and a wait the drain or the delivery's end ends
-hands the handler nothing and leaves the job for redelivery. `Setup` still needs its `Broker`, its
-outbox, and its inbox: the queue is given to `Work`, not to `Setup`.
+`Setup.Gate`, each delivery holds the gate for the handler's whole call, as a consumer's does.
+The job's delivery is extended while it waits for the gate; when the drain or the delivery's end
+ends the wait, the handler is not called and the job is left for redelivery. `Setup` still needs
+its `Broker`, its outbox, and its inbox: the queue is given to `Work`, not to `Setup`.
 
 ### Extension and the handler's context
 
@@ -350,7 +353,7 @@ While the handler runs, the queue extends the job's delivery, so a long job keep
 handler is given no way to extend it. The NATS queue sends an in-progress acknowledgement four
 times per `AckWait`; the memory queue's extension always succeeds. When no extension has
 succeeded for `AckWait`, as when the server is unreachable, the handler's context ends and the
-job is left for redelivery to any member, so the handler stops when its context ends: its
+job is left for redelivery to any member. The handler stops when its context ends, since its
 outcome after that is ignored. The context also ends when the reactor drains. A drained
 handler's nil still acknowledges its job and a permanent error still dead-letters it; any other
 error leaves the job for redelivery at once.
@@ -374,8 +377,8 @@ The handler's return is the job's outcome:
 A job leaves the queue only once its dead letter is stored. When the store fails, the job stays
 and is delivered again, after its attempt's `RetryDelay`, as its next attempt: a delivery past
 the final attempt, or of a message that does not decode, dead-letters it again without calling
-the handler, and any other calls the handler again, as after a permanent error on an earlier
-attempt. So a job past its final attempt always ends as a dead letter.
+the handler, and any other delivery calls the handler again, as after a permanent error on an
+earlier attempt. So a job past its final attempt always ends as a dead letter.
 
 ### Dead letters
 
