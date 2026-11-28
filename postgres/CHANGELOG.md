@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-27
+
 ### Changed
 
 - The module requires `sqlate` v0.8.0 and `sqlate/postgres` v0.9.0, and its `sqlint` tool is
@@ -97,7 +99,8 @@ changelog covers this sub-module only; the base module keeps its own.
 - The module requires `go-messaging` v0.1.0, `sqlate` and `sqlate/postgres` v0.5.0, and pgx
   v5.11.0, with the `sqlate/sqlint` tool at v0.3.0.
 
-[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.4.0...postgres/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.3.0...postgres/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.2.0...postgres/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/go-messaging/compare/postgres/v0.1.0...postgres/v0.2.0
